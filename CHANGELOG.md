@@ -27,4 +27,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
-[0.1.0]: https://github.com/nshkrdotcom/superlearner/releases/tag/v0.1.0
+[0.1.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.1.0
