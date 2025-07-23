@@ -1,7 +1,3 @@
-Of course. Here is a completely rewritten `README.md` for `Supertester v0.1.0`, keeping the logo and hex tag as requested. This version is designed to be more comprehensive, engaging, and clear for new users.
-
----
-
 # Supertester
 
 <p align="center">
