@@ -1,187 +1,164 @@
+Of course. Here is a completely rewritten `README.md` for `Supertester v0.1.0`, keeping the logo and hex tag as requested. This version is designed to be more comprehensive, engaging, and clear for new users.
+
+---
+
 # Supertester
 
-Multi-repository test orchestration and execution framework for Elixir monorepo structures.
+<p align="center">
+  <img src="assets/supertester-logo.svg" alt="Supertester Logo" width="200">
+</p>
 
-## Overview
+<p align="center">
+  <a href="https://hex.pm/packages/supertester"><img alt="Hex.pm" src="https://img.shields.io/hexpm/v/supertester.svg?style=for-the-badge&label=hex&color=blueviolet"></a>
+  <a href="https://github.com/nshkrdotcom/superlearner/actions"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/nshkrdotcom/superlearner/ci.yml?branch=main&style=for-the-badge&logo=github"></a>
+  <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/hexpm/l/supertester.svg?style=for-the-badge&color=lightgrey"></a>
+</p>
 
-Supertester provides centralized test management, execution, and reporting across multiple Elixir repositories in a monorepo structure. It eliminates common OTP testing issues like GenServer registration conflicts, improper synchronization using `Process.sleep/1`, and test interdependence.
+**A battle-hardened testing toolkit for building robust and resilient Elixir & OTP applications.**
+
+---
+
+## The Problem: Flaky OTP Tests
+
+Are you tired of...
+- 😫 **Flaky tests** that fail randomly due to race conditions?
+- 📛 **`GenServer` name clashes** when running tests with `async: true`?
+- 🕰️ Littering your test suite with `Process.sleep/1` and hoping for the best?
+- 🤷‍♂️ Struggling to test process crashes, restarts, and complex supervision trees?
+
+Writing tests for concurrent systems is hard. Traditional testing methods often lead to fragile, non-deterministic, and slow test suites.
+
+## The Solution: Supertester
+
+`Supertester` provides a comprehensive suite of tools to write clean, deterministic, and reliable tests for your OTP applications. It replaces fragile timing hacks with robust synchronization patterns and provides powerful helpers for simulating and asserting complex OTP behaviors.
+
+With `Supertester`, you can build a test suite that is **fast**, **parallel**, and **trustworthy**.
 
 ## Key Features
 
-- **OTP-Compliant Testing**: Replace `Process.sleep/1` with proper synchronization
-- **Test Isolation**: Enable `async: true` through process isolation
-- **GenServer Helpers**: Specialized utilities for GenServer testing
-- **Supervisor Testing**: Supervision tree and strategy testing utilities  
-- **Performance Testing**: Benchmarking and load testing framework
-- **Chaos Engineering**: Resilience and failure injection testing
-- **Zero Test Failures**: Eliminate race conditions and process conflicts
+- ✅ **Rock-Solid Test Isolation**: Run all your tests with `async: true` without fear of process name collisions or state leakage.
+- 🔄 **Deterministic Synchronization**: No more `Process.sleep/1`. Use helpers that wait for processes to be ready, `cast`s to be processed, and supervisors to stabilize.
+- 🤖 **Powerful OTP Assertions**: Go beyond `assert`. Use `assert_process_restarted/2`, `assert_genserver_state/2`, and `assert_all_children_alive/1` for more expressive tests.
+- ✨ **Effortless Setup & Teardown**: Start isolated `GenServer`s and `Supervisor`s with a single line and trust `Supertester` to handle all the cleanup.
+- 💥 **Resilience & Chaos Testing**: Tools for testing crash recovery, supervision strategies, and system stability under stress.
 
 ## Installation
 
-Add supertester as a test dependency in your `mix.exs`:
+Add `supertester` as a dependency in your `mix.exs` file. It's only needed for the `:test` environment.
 
 ```elixir
 def deps do
   [
-    {:supertester, path: "../supertester", only: :test}
+    {:supertester, "~> 0.1.0", only: :test}
   ]
 end
 ```
 
-## Usage
+Then, run `mix deps.get` to install.
 
-### Basic GenServer Testing
+## Quick Start: From Flaky to Robust
+
+See how `Supertester` transforms a common, fragile test pattern into a robust, deterministic one.
+
+#### Before: The Flaky Way
 
 ```elixir
-defmodule MyApp.MyGenServerTest do
-  use ExUnit.Case, async: true
+# test/my_app/counter_test.exs
+defmodule MyApp.CounterTest do
+  use ExUnit.Case, async: false # <-- Forced to run sequentially
+
+  test "incrementing the counter" do
+    # Manual setup, prone to name conflicts
+    {:ok, _pid} = start_supervised({Counter, name: Counter})
+
+    GenServer.cast(Counter, :increment)
+    Process.sleep(50) # <-- Fragile, timing-dependent guess
+
+    state = GenServer.call(Counter, :state)
+    assert state.count == 1
+  end
+end
+```
+
+#### After: The Supertester Way
+
+```elixir
+# test/my_app/counter_test.exs
+defmodule MyApp.CounterTest do
+  use ExUnit.Case, async: true # <-- Fully parallel!
+
+  # Import the tools you need
   import Supertester.OTPHelpers
   import Supertester.GenServerHelpers
   import Supertester.Assertions
 
-  describe "my genserver functionality" do
-    setup do
-      {:ok, server} = setup_isolated_genserver(MyGenServer, "basic_test")
-      %{server: server}
-    end
+  test "incrementing the counter" do
+    # Isolated setup with automatic cleanup, no name clashes
+    {:ok, counter_pid} = setup_isolated_genserver(Counter)
 
-    test "server responds to calls", %{server: server} do
-      assert_genserver_responsive(server)
-      {:ok, response} = call_with_timeout(server, :get_state)
-      assert response == %{counter: 0}
-    end
+    # Deterministic sync: ensures the cast is processed before continuing
+    :ok = cast_and_sync(counter_pid, :increment)
 
-    test "server handles casts properly", %{server: server} do
-      :ok = cast_and_sync(server, {:increment, 5})
-      assert_genserver_state(server, %{counter: 5})
-    end
+    # Expressive, OTP-aware assertion for checking state
+    assert_genserver_state(counter_pid, fn state -> state.count == 1 end)
   end
 end
 ```
 
-### Supervisor Testing
+## Core API Highlights
+
+`Supertester` is organized into several modules, each targeting a specific area of OTP testing.
+
+### `Supertester.OTPHelpers`
+For setting up and managing isolated OTP processes.
+- `setup_isolated_genserver/3`: Starts a `GenServer` with a unique name and automatic cleanup.
+- `setup_isolated_supervisor/3`: Starts a `Supervisor` with a unique name and automatic cleanup.
+- `wait_for_process_restart/3`: Blocks until a supervised process has been terminated and restarted.
+- `wait_for_genserver_sync/2`: Ensures a `GenServer` is alive and responsive.
+
+### `Supertester.GenServerHelpers`
+For interacting with and testing `GenServer`s.
+- `cast_and_sync/3`: Sends a `cast` and waits for a follow-up `call` to confirm it was processed.
+- `get_server_state_safely/1`: Fetches `GenServer` state without crashing if the process is down.
+- `test_server_crash_recovery/2`: Simulates a process crash and verifies its recovery by the supervisor.
+- `concurrent_calls/3`: Stress-tests a `GenServer` with many concurrent requests.
+
+### `Supertester.Assertions`
+Custom, OTP-aware assertions for more meaningful tests.
+- `assert_process_alive/1` & `assert_process_dead/1`
+- `assert_genserver_state/2`: Asserts the `GenServer`'s internal state matches a value or passes a function check.
+- `assert_child_count/2`: Asserts a supervisor has an exact number of active children.
+- `assert_all_children_alive/1`: Checks that all children in a supervision tree are running.
+- `assert_no_process_leaks/1`: Ensures an operation cleans up all the processes it spawns.
+
+### `Supertester.UnifiedTestFoundation`
+Provides advanced, case-level isolation for complex scenarios.
 
 ```elixir
-defmodule MyApp.MySupervisorTest do
-  use ExUnit.Case, async: true
-  import Supertester.OTPHelpers
-  import Supertester.SupervisorHelpers
-  import Supertester.Assertions
-
-  describe "supervisor behavior" do
-    setup do
-      {:ok, supervisor} = setup_isolated_supervisor(MySupervisor, "supervisor_test")
-      %{supervisor: supervisor}
-    end
-
-    test "supervisor manages children correctly", %{supervisor: supervisor} do
-      assert_all_children_alive(supervisor)
-      assert_child_count(supervisor, 3)
-    end
-  end
-end
-```
-
-### Advanced Testing with Isolation
-
-```elixir
-defmodule MyApp.AdvancedTest do
+defmodule MyApp.MyAdvancedTest do
   use ExUnit.Case
+  # Choose an isolation level for the entire test module.
+  # :full_isolation provides sandboxed processes and ETS tables.
   use Supertester.UnifiedTestFoundation, isolation: :full_isolation
 
-  test "full isolation testing", context do
-    # Test runs with complete process and ETS isolation
-    # Multiple tests can run concurrently without conflicts
+  test "this test runs in a complete sandbox", context do
+    # `context.isolation_context` holds info about the sandbox.
+    # All processes started via Supertester helpers are tracked and auto-cleaned.
+    {:ok, server} = Supertester.OTPHelpers.setup_isolated_genserver(MyServer)
+    # ... your isolated test logic ...
   end
 end
-```
-
-## Core Modules
-
-- **`Supertester.UnifiedTestFoundation`** - Test isolation and foundation patterns
-- **`Supertester.OTPHelpers`** - OTP-compliant testing utilities
-- **`Supertester.GenServerHelpers`** - GenServer-specific test patterns
-- **`Supertester.SupervisorHelpers`** - Supervision tree testing utilities
-- **`Supertester.MessageHelpers`** - Message tracing and ETS management
-- **`Supertester.PerformanceHelpers`** - Benchmarking and load testing
-- **`Supertester.ChaosHelpers`** - Chaos engineering and resilience testing
-- **`Supertester.DataGenerators`** - Test data and scenario generation
-- **`Supertester.Assertions`** - Custom OTP-aware assertions
-
-## Migration from Legacy Patterns
-
-### Before (with Process.sleep)
-
-```elixir
-test "legacy pattern with sleep" do
-  {:ok, server} = GenServer.start_link(MyServer, [], name: MyServer)
-  GenServer.cast(MyServer, :increment)
-  :timer.sleep(10)  # BAD: Timing-based synchronization
-  
-  {:ok, state} = GenServer.call(MyServer, :get_state)
-  assert state.counter == 1
-  
-  GenServer.stop(MyServer)
-end
-```
-
-### After (with Supertester)
-
-```elixir
-test "improved pattern with supertester" do
-  {:ok, server} = setup_isolated_genserver(MyServer, "test")
-  :ok = cast_and_sync(server, :increment)  # GOOD: Deterministic synchronization
-  
-  assert_genserver_state(server, fn state -> state.counter == 1 end)
-  # Automatic cleanup handled by supertester
-end
-```
-
-## Testing Strategy
-
-### Test Organization
-
-```
-test/
-├── unit/               # Individual module tests
-├── integration/        # Cross-module integration tests  
-├── performance/        # Performance and load tests
-└── support/           # Test helpers and utilities
-```
-
-### Best Practices
-
-1. **Always use `async: true`** with proper isolation
-2. **Replace `Process.sleep/1`** with synchronization helpers
-3. **Use unique process names** via isolation helpers
-4. **Test supervision strategies** explicitly
-5. **Include performance assertions** in critical paths
-6. **Add chaos testing** for resilience validation
-
-## Development
-
-```bash
-# Install dependencies
-mix deps.get
-
-# Run tests
-mix test
-
-# Run with coverage
-mix test --cover
-
-# Check code quality
-mix credo
-mix dialyzer
 ```
 
 ## Contributing
 
-1. Follow OTP best practices in all test helpers
-2. Ensure all new features include comprehensive tests
-3. Maintain documentation for all public functions
-4. Add performance considerations for new helpers
+Contributions are welcome! If you'd like to help improve `Supertester`, please feel free to:
+1.  Fork the repository.
+2.  Create a new feature branch.
+3.  Add your feature or bug fix.
+4.  Ensure all new code is covered by tests.
+5.  Open a pull request.
 
 ## License
 
-Apache License 2.0
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

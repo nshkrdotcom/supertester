@@ -26,6 +26,7 @@ defmodule Supertester.Assertions do
 
       assert_process_alive(server_pid)
   """
+  @spec assert_process_alive(pid()) :: :ok
   def assert_process_alive(pid) when is_pid(pid) do
     if Process.alive?(pid) do
       :ok
@@ -45,6 +46,7 @@ defmodule Supertester.Assertions do
 
       assert_process_dead(old_pid)
   """
+  @spec assert_process_dead(pid()) :: :ok
   def assert_process_dead(pid) when is_pid(pid) do
     if Process.alive?(pid) do
       raise "Expected process #{inspect(pid)} to be dead, but it was alive"
@@ -67,6 +69,7 @@ defmodule Supertester.Assertions do
       GenServer.stop(MyServer)
       assert_process_restarted(MyServer, original_pid)
   """
+  @spec assert_process_restarted(atom(), pid()) :: :ok
   def assert_process_restarted(process_name, original_pid)
       when is_atom(process_name) and is_pid(original_pid) do
     current_pid = Process.whereis(process_name)
@@ -96,6 +99,7 @@ defmodule Supertester.Assertions do
       assert_genserver_state(server, %{counter: 5})
       assert_genserver_state(server, fn state -> state.counter > 0 end)
   """
+  @spec assert_genserver_state(GenServer.server(), term() | (term() -> boolean())) :: :ok
   def assert_genserver_state(server, expected_state) do
     case Supertester.GenServerHelpers.get_server_state_safely(server) do
       {:ok, actual_state} ->
@@ -131,6 +135,7 @@ defmodule Supertester.Assertions do
 
       assert_genserver_responsive(server)
   """
+  @spec assert_genserver_responsive(GenServer.server()) :: :ok
   def assert_genserver_responsive(server) do
     case Supertester.OTPHelpers.wait_for_genserver_sync(server, 1000) do
       :ok ->
@@ -154,6 +159,7 @@ defmodule Supertester.Assertions do
 
       assert_genserver_handles_message(server, :get_counter, {:ok, 5})
   """
+  @spec assert_genserver_handles_message(GenServer.server(), term(), term()) :: :ok
   def assert_genserver_handles_message(server, message, expected_response) do
     case Supertester.GenServerHelpers.call_with_timeout(server, message, 1000) do
       {:ok, actual_response} ->
@@ -180,6 +186,7 @@ defmodule Supertester.Assertions do
 
       assert_supervisor_strategy(supervisor, :one_for_one)
   """
+  @spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
   def assert_supervisor_strategy(supervisor, _expected_strategy) do
     try do
       _children = Supervisor.which_children(supervisor)
@@ -207,6 +214,7 @@ defmodule Supertester.Assertions do
 
       assert_child_count(supervisor, 3)
   """
+  @spec assert_child_count(Supervisor.supervisor(), non_neg_integer()) :: :ok
   def assert_child_count(supervisor, expected_count) when is_integer(expected_count) do
     try do
       %{active: active} = Supervisor.count_children(supervisor)
@@ -233,6 +241,7 @@ defmodule Supertester.Assertions do
 
       assert_all_children_alive(supervisor)
   """
+  @spec assert_all_children_alive(Supervisor.supervisor()) :: :ok
   def assert_all_children_alive(supervisor) do
     try do
       children = Supervisor.which_children(supervisor)
@@ -269,6 +278,7 @@ defmodule Supertester.Assertions do
         Enum.each(1..1000, fn _ -> GenServer.call(server, :increment) end)
       end, 0.05)
   """
+  @spec assert_memory_usage_stable((-> any()), float()) :: :ok
   def assert_memory_usage_stable(operation_fun, tolerance \\ 0.1)
       when is_function(operation_fun, 0) do
     initial_memory = :erlang.memory(:total)
@@ -302,6 +312,7 @@ defmodule Supertester.Assertions do
         GenServer.stop(server)
       end)
   """
+  @spec assert_no_process_leaks((-> any())) :: :ok
   def assert_no_process_leaks(operation_fun) when is_function(operation_fun, 0) do
     initial_processes = Process.list()
 
@@ -350,6 +361,7 @@ defmodule Supertester.Assertions do
       expectations = %{max_time: 1000, max_memory: 1_000_000}
       assert_performance_within_bounds(result, expectations)
   """
+  @spec assert_performance_within_bounds(map(), map()) :: :ok
   def assert_performance_within_bounds(benchmark_result, expectations)
       when is_map(expectations) do
     Enum.each(expectations, fn {metric, expected_value} ->

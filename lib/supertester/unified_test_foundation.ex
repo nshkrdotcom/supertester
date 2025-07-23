@@ -49,6 +49,7 @@ defmodule Supertester.UnifiedTestFoundation do
   @doc """
   Sets up test isolation based on the specified isolation type.
   """
+  @spec setup_isolation(atom(), map()) :: {:ok, map()}
   def setup_isolation(isolation_type, context) do
     case isolation_type do
       :basic ->
@@ -68,6 +69,7 @@ defmodule Supertester.UnifiedTestFoundation do
   @doc """
   Returns whether the isolation type allows async testing.
   """
+  @spec isolation_allows_async?(atom()) :: boolean()
   def isolation_allows_async?(:basic), do: true
   def isolation_allows_async?(:registry), do: true
   def isolation_allows_async?(:full_isolation), do: true
@@ -76,6 +78,7 @@ defmodule Supertester.UnifiedTestFoundation do
   @doc """
   Returns the timeout for the isolation type.
   """
+  @spec isolation_timeout(atom()) :: non_neg_integer()
   def isolation_timeout(:basic), do: 5_000
   def isolation_timeout(:registry), do: 10_000
   def isolation_timeout(:full_isolation), do: 15_000
@@ -84,6 +87,7 @@ defmodule Supertester.UnifiedTestFoundation do
   @doc """
   Verifies test isolation has been maintained.
   """
+  @spec verify_test_isolation(map()) :: boolean()
   def verify_test_isolation(context) do
     isolation_context = Map.get(context, :isolation_context, %{})
 
@@ -95,6 +99,8 @@ defmodule Supertester.UnifiedTestFoundation do
   @doc """
   Waits for a supervision tree to be ready.
   """
+  @spec wait_for_supervision_tree_ready(pid(), non_neg_integer()) ::
+          {:ok, pid()} | {:error, :timeout}
   def wait_for_supervision_tree_ready(supervisor_pid, timeout \\ 5000) do
     start_time = System.monotonic_time(:millisecond)
     wait_for_supervisor_ready(supervisor_pid, start_time, timeout)

@@ -49,6 +49,7 @@ defmodule Supertester do
   @doc """
   Returns the version of Supertester.
   """
+  @spec version() :: String.t()
   def version do
     Application.spec(:supertester, :vsn) |> to_string()
   end

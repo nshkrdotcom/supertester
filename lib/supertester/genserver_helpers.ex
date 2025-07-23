@@ -42,6 +42,7 @@ defmodule Supertester.GenServerHelpers do
 
       {:ok, state} = get_server_state_safely(my_server)
   """
+  @spec get_server_state_safely(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_server_state_safely(server) do
     try do
       # Try to get state via :sys.get_state/1 which works for most GenServers
@@ -72,6 +73,8 @@ defmodule Supertester.GenServerHelpers do
 
       {:ok, response} = call_with_timeout(server, :get_counter, 5000)
   """
+  @spec call_with_timeout(GenServer.server(), term(), timeout()) ::
+          {:ok, term()} | {:error, term()}
   def call_with_timeout(server, message, timeout \\ 1000) do
     try do
       response = GenServer.call(server, message, timeout)
@@ -105,6 +108,8 @@ defmodule Supertester.GenServerHelpers do
       {:ok, state} = get_server_state_safely(server)
       assert state.counter == 5
   """
+  @spec cast_and_sync(GenServer.server(), term(), term()) ::
+          :ok | {:ok, term()} | {:error, term()}
   def cast_and_sync(server, cast_message, sync_message \\ :__supertester_sync__) do
     try do
       :ok = GenServer.cast(server, cast_message)
@@ -141,6 +146,8 @@ defmodule Supertester.GenServerHelpers do
       calls = [:get_counter, {:increment, 1}, :get_counter]
       {:ok, results} = concurrent_calls(server, calls, 5)
   """
+  @spec concurrent_calls(GenServer.server(), [term()], pos_integer()) ::
+          {:ok, [{term(), [term()]}]}
   def concurrent_calls(server, calls, count \\ 10) do
     tasks =
       for call <- calls,
@@ -186,6 +193,7 @@ defmodule Supertester.GenServerHelpers do
       ]
       {:ok, stats} = stress_test_server(server, operations, 10_000)
   """
+  @spec stress_test_server(GenServer.server(), [term()], pos_integer()) :: {:ok, map()}
   def stress_test_server(server, operations, duration \\ 5000) do
     start_time = System.monotonic_time(:millisecond)
     end_time = start_time + duration
@@ -223,6 +231,7 @@ defmodule Supertester.GenServerHelpers do
       {:ok, info} = test_server_crash_recovery(server, :test_crash)
       assert info.recovered == true
   """
+  @spec test_server_crash_recovery(GenServer.server(), term()) :: {:ok, map()} | {:error, term()}
   def test_server_crash_recovery(server, crash_reason) do
     # Get original PID
     original_pid =
@@ -294,6 +303,7 @@ defmodule Supertester.GenServerHelpers do
       invalid_messages = [:invalid_call, {:unknown, :message}, "string_message"]
       {:ok, results} = test_invalid_messages(server, invalid_messages)
   """
+  @spec test_invalid_messages(GenServer.server(), [term()]) :: {:ok, [{term(), term()}]}
   def test_invalid_messages(server, invalid_messages) do
     results =
       Enum.map(invalid_messages, fn message ->

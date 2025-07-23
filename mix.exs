@@ -1,17 +1,22 @@
 defmodule Supertester.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @source_url "https://github.com/nshkrdotcom/superlearner"
+
   def project do
     [
       app: :supertester,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      description:
-        "Multi-repository test orchestration and execution framework for Elixir monorepo structures",
+      description: description(),
       package: package(),
+      docs: docs(),
+      source_url: @source_url,
+      homepage_url: @source_url,
       preferred_cli_env: [
         "test.all": :test,
         "test.integration": :test,
@@ -43,11 +48,47 @@ defmodule Supertester.MixProject do
     ]
   end
 
+  defp description do
+    """
+    Multi-repository test orchestration and execution framework for Elixir monorepo structures
+    """
+  end
+
   defp package do
     [
-      files: ~w(lib mix.exs README.md),
-      licenses: ["Apache-2.0"],
-      links: %{"GitHub" => "https://github.com/nshkrdotcom/supertester"}
+      name: "supertester",
+      files: ~w(lib assets .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      licenses: ["MIT"],
+      links: %{
+        "GitHub" => @source_url,
+        "Docs" => "https://hexdocs.pm/supertester"
+      },
+      maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      name: "Supertester",
+      source_url: @source_url,
+      source_ref: "v#{@version}",
+      extras: ["README.md", "CHANGELOG.md"],
+      assets: %{"assets" => "assets"},
+      logo: "assets/supertester-logo.svg",
+      groups_for_modules: [
+        Core: [
+          Supertester,
+          Supertester.UnifiedTestFoundation
+        ],
+        Helpers: [
+          Supertester.OTPHelpers,
+          Supertester.GenServerHelpers
+        ],
+        Utilities: [
+          Supertester.Assertions
+        ]
+      ]
     ]
   end
 end

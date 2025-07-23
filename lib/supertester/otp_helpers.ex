@@ -40,6 +40,8 @@ defmodule Supertester.OTPHelpers do
 
       {:ok, server} = setup_isolated_genserver(MyGenServer, "my_test", [initial_state: %{}])
   """
+  @spec setup_isolated_genserver(module(), String.t(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
   def setup_isolated_genserver(module, test_name \\ "", opts \\ []) do
     unique_name = generate_unique_process_name(module, test_name)
 
@@ -88,6 +90,8 @@ defmodule Supertester.OTPHelpers do
 
       {:ok, supervisor} = setup_isolated_supervisor(MySupervisor, "my_test")
   """
+  @spec setup_isolated_supervisor(module(), String.t(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
   def setup_isolated_supervisor(module, test_name \\ "", opts \\ []) do
     unique_name = generate_unique_process_name(module, test_name)
 
@@ -134,6 +138,7 @@ defmodule Supertester.OTPHelpers do
 
       wait_for_genserver_sync(server, 5000)
   """
+  @spec wait_for_genserver_sync(GenServer.server(), timeout()) :: :ok | {:error, term()}
   def wait_for_genserver_sync(server, timeout \\ 1000) do
     try do
       # Use a synchronous call to ensure the server is responsive
@@ -165,6 +170,7 @@ defmodule Supertester.OTPHelpers do
       GenServer.stop(MyServer)
       {:ok, new_pid} = wait_for_process_restart(MyServer, original_pid)
   """
+  @spec wait_for_process_restart(atom(), pid(), timeout()) :: {:ok, pid()} | {:error, term()}
   def wait_for_process_restart(process_name, original_pid, timeout \\ 1000) do
     start_time = System.monotonic_time(:millisecond)
     wait_for_restart_loop(process_name, original_pid, start_time, timeout)
@@ -187,6 +193,8 @@ defmodule Supertester.OTPHelpers do
       {:ok, supervisor} = setup_isolated_supervisor(MySupervisor)
       wait_for_supervisor_restart(supervisor)
   """
+  @spec wait_for_supervisor_restart(Supervisor.supervisor(), timeout()) ::
+          {:ok, pid()} | {:error, term()}
   def wait_for_supervisor_restart(supervisor, timeout \\ 1000) do
     Supertester.UnifiedTestFoundation.wait_for_supervision_tree_ready(supervisor, timeout)
   end
@@ -206,6 +214,7 @@ defmodule Supertester.OTPHelpers do
 
       {ref, pid} = monitor_process_lifecycle(server_pid)
   """
+  @spec monitor_process_lifecycle(pid()) :: {reference(), pid()}
   def monitor_process_lifecycle(pid) when is_pid(pid) do
     ref = Process.monitor(pid)
     {ref, pid}
@@ -229,6 +238,7 @@ defmodule Supertester.OTPHelpers do
       Process.exit(pid, :kill)
       {:ok, :killed} = wait_for_process_death(pid)
   """
+  @spec wait_for_process_death(pid(), timeout()) :: {:ok, term()} | {:error, :timeout}
   def wait_for_process_death(pid, timeout \\ 1000) when is_pid(pid) do
     ref = Process.monitor(pid)
 
@@ -253,6 +263,7 @@ defmodule Supertester.OTPHelpers do
 
       cleanup_processes([pid1, pid2, pid3])
   """
+  @spec cleanup_processes([pid()]) :: :ok
   def cleanup_processes(pids) when is_list(pids) do
     Enum.each(pids, &stop_process_safely/1)
   end
@@ -268,6 +279,7 @@ defmodule Supertester.OTPHelpers do
 
       cleanup_on_exit(fn -> GenServer.stop(my_server) end)
   """
+  @spec cleanup_on_exit((-> any())) :: :ok
   def cleanup_on_exit(cleanup_fun) when is_function(cleanup_fun, 0) do
     # This function is meant to be used within test contexts where ExUnit.Callbacks is available
     # The actual implementation will be injected by the test case
