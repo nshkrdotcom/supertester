@@ -61,7 +61,7 @@ defmodule Supertester.MixProject do
     [
       name: "supertester",
       description: description(),
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md MANUAL.md),
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
@@ -85,6 +85,7 @@ defmodule Supertester.MixProject do
       homepage_url: @source_url,
       extras: [
         "README.md",
+        "MANUAL.md",
         "docs/QUICK_START.md",
         "docs/API_GUIDE.md",
         "CHANGELOG.md",
@@ -93,7 +94,7 @@ defmodule Supertester.MixProject do
         "docs/RELEASE_0.2.0_SUMMARY.md"
       ],
       groups_for_extras: [
-        Guides: ["README.md", "docs/QUICK_START.md", "docs/API_GUIDE.md"],
+        Guides: ["README.md", "MANUAL.md", "docs/QUICK_START.md", "docs/API_GUIDE.md"],
         Design: [
           "docs/technical-design-enhancement-20251007.md",
           "docs/implementation-status-final.md"
