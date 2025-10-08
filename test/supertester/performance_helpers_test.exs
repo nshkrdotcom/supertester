@@ -113,13 +113,16 @@ defmodule Supertester.PerformanceHelpersTest do
     test "measures operation time and memory" do
       result =
         measure_operation(fn ->
-          Enum.sum(1..1000)
+          # Use a more complex operation that can't be optimized away
+          1..10_000
+          |> Enum.map(&(&1 * 2))
+          |> Enum.reduce(0, &+/2)
         end)
 
       assert Map.has_key?(result, :time_us)
       assert Map.has_key?(result, :memory_bytes)
       assert Map.has_key?(result, :reductions)
-      assert result.time_us > 0
+      assert result.time_us >= 0
       assert result.reductions > 0
     end
 

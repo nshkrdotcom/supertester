@@ -188,8 +188,8 @@ defmodule Supertester.UnifiedTestFoundation do
   defp generate_test_id(context) do
     test_name =
       case context do
-        %{test: test_atom} -> Atom.to_string(test_atom)
         %{case: case_atom, test: test_atom} -> "#{case_atom}_#{test_atom}"
+        %{test: test_atom} -> Atom.to_string(test_atom)
         _ -> "anonymous"
       end
 
