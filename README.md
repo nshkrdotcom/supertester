@@ -107,79 +107,25 @@ defmodule MyApp.CounterTest do
 end
 ```
 
-## Core API Highlights
+## Core Modules Overview
 
-`Supertester` is organized into several modules, each targeting a specific area of OTP testing.
+`Supertester` is organized into several powerful modules, each targeting a specific area of OTP testing.
 
-### `Supertester.OTPHelpers`
-For setting up and managing isolated OTP processes.
-- `setup_isolated_genserver/3`: Starts a `GenServer` with a unique name and automatic cleanup.
-- `setup_isolated_supervisor/3`: Starts a `Supervisor` with a unique name and automatic cleanup.
-- `wait_for_process_restart/3`: Blocks until a supervised process has been terminated and restarted.
-- `wait_for_genserver_sync/2`: Ensures a `GenServer` is alive and responsive.
+- **`Supertester.UnifiedTestFoundation`**: The cornerstone of test isolation. Use it in your test cases to create a sandboxed environment, enabling safe concurrent testing with automatic cleanup of processes and ETS tables.
 
-### `Supertester.GenServerHelpers`
-For interacting with and testing `GenServer`s.
-- `cast_and_sync/3`: Sends a `cast` and waits for a follow-up `call` to confirm it was processed.
-- `get_server_state_safely/1`: Fetches `GenServer` state without crashing if the process is down.
-- `test_server_crash_recovery/2`: Simulates a process crash and verifies its recovery by the supervisor.
-- `concurrent_calls/3`: Stress-tests a `GenServer` with many concurrent requests.
+- **`Supertester.TestableGenServer`**: A simple behavior to make your `GenServer`s more testable. It automatically injects handlers to allow deterministic synchronization in your tests, completely eliminating the need for `Process.sleep/1`.
 
-### `Supertester.Assertions`
-Custom, OTP-aware assertions for more meaningful tests.
-- `assert_process_alive/1` & `assert_process_dead/1`
-- `assert_genserver_state/2`: Asserts the `GenServer`'s internal state matches a value or passes a function check.
-- `assert_child_count/2`: Asserts a supervisor has an exact number of active children.
-- `assert_all_children_alive/1`: Checks that all children in a supervision tree are running.
-- `assert_no_process_leaks/1`: Ensures an operation cleans up all the processes it spawns.
+- **`Supertester.OTPHelpers`**: Provides the essential tools for managing the lifecycle of isolated OTP processes. Functions like `setup_isolated_genserver/3` and `setup_isolated_supervisor/3` are your entry point for starting processes within the isolated test environment.
 
-### `Supertester.UnifiedTestFoundation`
-Provides advanced, case-level isolation for complex scenarios.
+- **`Supertester.GenServerHelpers`**: Contains specialized functions for interacting with `GenServer`s. The star of this module is `cast_and_sync/2`, which provides a robust way to test asynchronous `cast` operations deterministically. It also includes helpers for stress-testing and crash recovery scenarios.
 
-```elixir
-defmodule MyApp.MyAdvancedTest do
-  use ExUnit.Case
-  # Choose an isolation level for the entire test module.
-  # :full_isolation provides sandboxed processes and ETS tables.
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+- **`Supertester.SupervisorHelpers`**: A dedicated toolkit for testing the backbone of OTP applications: supervisors. You can verify restart strategies, validate supervision tree structures, and trace supervision events to ensure your application is truly fault-tolerant.
 
-  test "this test runs in a complete sandbox", context do
-    # `context.isolation_context` holds info about the sandbox.
-    # All processes started via Supertester helpers are tracked and auto-cleaned.
-    {:ok, server} = Supertester.OTPHelpers.setup_isolated_genserver(MyServer)
-    # ... your isolated test logic ...
-  end
-end
-```
+- **`Supertester.ChaosHelpers`**: Unleash controlled chaos to test your system's resilience. This module allows you to inject faults, kill random processes, and simulate resource exhaustion to ensure your system can withstand turbulent conditions.
 
-### `Supertester.SupervisorHelpers`
-Specialized testing for supervision trees and restart strategies.
-- `test_restart_strategy/3`: Verify one_for_one, one_for_all, rest_for_one strategies
-- `assert_supervision_tree_structure/2`: Validate supervision tree structure
-- `trace_supervision_events/2`: Monitor supervisor events
-- `wait_for_supervisor_stabilization/2`: Wait for all children to be ready
+- **`Supertester.PerformanceHelpers`**: Integrate performance testing directly into your test suite. Assert that your code meets performance SLAs, detect memory leaks, and prevent performance regressions before they hit production.
 
-### `Supertester.ChaosHelpers`
-Chaos engineering toolkit for resilience testing.
-- `inject_crash/3`: Controlled crash injection (immediate, delayed, random)
-- `chaos_kill_children/3`: Random child killing in supervision trees
-- `simulate_resource_exhaustion/2`: Process/ETS/memory exhaustion simulation
-- `assert_chaos_resilient/3`: Verify system recovery from chaos
-- `run_chaos_suite/3`: Comprehensive chaos scenario testing
-
-### `Supertester.PerformanceHelpers`
-Performance testing and regression detection.
-- `assert_performance/2`: Assert time/memory/reduction bounds
-- `assert_no_memory_leak/2`: Detect memory leaks over iterations
-- `measure_operation/1`: Measure time, memory, and CPU work
-- `assert_mailbox_stable/2`: Ensure mailbox doesn't grow unbounded
-- `compare_performance/2`: Compare multiple function performances
-
-### `Supertester.TestableGenServer`
-Automatic sync handler injection for GenServers.
-- Automatically adds `__supertester_sync__` handler to any GenServer
-- Enables deterministic testing without `Process.sleep/1`
-- Works seamlessly with existing GenServer implementations
+- **`Supertester.Assertions`**: A rich set of custom assertions that understand OTP primitives. Go beyond simple equality checks with assertions like `assert_genserver_state/2`, `assert_all_children_alive/1`, and `assert_no_process_leaks/1` for more expressive and meaningful tests.
 
 ## Advanced Usage Examples
 
@@ -260,6 +206,18 @@ test "supervision tree structure" do
   })
 end
 ```
+
+## Documentation
+
+For a comprehensive guide to all features, modules, and functions, please see the full **[User Manual](MANUAL.md)**.
+
+The user manual includes:
+- In-depth explanations of every module.
+- Detailed function signatures, parameters, and return values.
+- Practical code examples and recipes for common testing scenarios.
+- Best practices for writing robust tests.
+
+Additional documentation, including the technical design, can be found in the `docs/` directory.
 
 ## What's New in 0.2.0
 
