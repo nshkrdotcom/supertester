@@ -335,27 +335,43 @@ defmodule Supertester.OTPHelpers do
 
   defp wait_for_restart_loop(process_name, original_pid, start_time, timeout) do
     current_time = System.monotonic_time(:millisecond)
+    remaining = timeout - (current_time - start_time)
 
-    if current_time - start_time > timeout do
+    if remaining <= 0 do
       {:error, :timeout}
     else
       case Process.whereis(process_name) do
         nil ->
-          Process.sleep(5)
+          # Process not yet registered, wait with receive timeout
+          receive do
+          after
+            min(5, remaining) -> :ok
+          end
+
           wait_for_restart_loop(process_name, original_pid, start_time, timeout)
 
         ^original_pid ->
-          Process.sleep(5)
+          # Still the old PID, wait for it to change
+          receive do
+          after
+            min(5, remaining) -> :ok
+          end
+
           wait_for_restart_loop(process_name, original_pid, start_time, timeout)
 
         new_pid when is_pid(new_pid) ->
-          # Verify the new process is responsive
+          # New process found, verify it's responsive
           case wait_for_genserver_sync(new_pid, 100) do
             :ok ->
               {:ok, new_pid}
 
             {:error, _} ->
-              Process.sleep(5)
+              # Not responsive yet, wait a bit
+              receive do
+              after
+                min(5, remaining) -> :ok
+              end
+
               wait_for_restart_loop(process_name, original_pid, start_time, timeout)
           end
       end

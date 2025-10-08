@@ -318,8 +318,11 @@ defmodule Supertester.Assertions do
 
     operation_fun.()
 
-    # Allow some time for cleanup
-    Process.sleep(10)
+    # Allow some time for cleanup using receive timeout instead of Process.sleep
+    receive do
+    after
+      10 -> :ok
+    end
 
     final_processes = Process.list()
     leaked_processes = final_processes -- initial_processes

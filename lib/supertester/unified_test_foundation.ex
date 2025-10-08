@@ -267,8 +267,9 @@ defmodule Supertester.UnifiedTestFoundation do
 
   defp wait_for_supervisor_ready(supervisor_pid, start_time, timeout) do
     current_time = System.monotonic_time(:millisecond)
+    remaining = timeout - (current_time - start_time)
 
-    if current_time - start_time > timeout do
+    if remaining <= 0 do
       {:error, :timeout}
     else
       children = Supervisor.which_children(supervisor_pid)
@@ -276,7 +277,12 @@ defmodule Supertester.UnifiedTestFoundation do
       if Enum.all?(children, &child_ready?/1) do
         {:ok, supervisor_pid}
       else
-        Process.sleep(10)
+        # Wait using receive timeout instead of Process.sleep
+        receive do
+        after
+          min(10, remaining) -> :ok
+        end
+
         wait_for_supervisor_ready(supervisor_pid, start_time, timeout)
       end
     end

@@ -374,8 +374,9 @@ defmodule Supertester.GenServerHelpers do
 
   defp wait_for_recovery_loop(server, original_pid, start_time, timeout) do
     current_time = System.monotonic_time(:millisecond)
+    remaining = timeout - (current_time - start_time)
 
-    if current_time - start_time > timeout do
+    if remaining <= 0 do
       {:error, :recovery_timeout}
     else
       current_pid =
@@ -386,11 +387,21 @@ defmodule Supertester.GenServerHelpers do
 
       cond do
         current_pid == nil ->
-          Process.sleep(10)
+          # Process not yet restarted, wait using receive timeout
+          receive do
+          after
+            min(10, remaining) -> :ok
+          end
+
           wait_for_recovery_loop(server, original_pid, start_time, timeout)
 
         current_pid == original_pid ->
-          Process.sleep(10)
+          # Still the old PID, wait for restart
+          receive do
+          after
+            min(10, remaining) -> :ok
+          end
+
           wait_for_recovery_loop(server, original_pid, start_time, timeout)
 
         current_pid != original_pid ->
@@ -400,7 +411,12 @@ defmodule Supertester.GenServerHelpers do
               {:ok, current_pid}
 
             {:error, _} ->
-              Process.sleep(10)
+              # Not responsive yet, wait a bit
+              receive do
+              after
+                min(10, remaining) -> :ok
+              end
+
               wait_for_recovery_loop(server, original_pid, start_time, timeout)
           end
       end

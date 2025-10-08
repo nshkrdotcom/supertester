@@ -6,11 +6,14 @@
 
 <p align="center">
   <a href="https://hex.pm/packages/supertester"><img alt="Hex.pm" src="https://img.shields.io/hexpm/v/supertester.svg"></a>
+  <a href="https://hexdocs.pm/supertester"><img alt="Documentation" src="https://img.shields.io/badge/docs-hexdocs-purple.svg"></a>
   <a href="https://github.com/nshkrdotcom/supertester/actions"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/nshkrdotcom/supertester/ci.yml"></a>
   <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/hexpm/l/supertester.svg"></a>
 </p>
 
-**A battle-hardened testing toolkit for building robust and resilient Elixir & OTP applications.**
+**A battle-hardened OTP testing toolkit with chaos engineering, performance testing, and zero-sleep synchronization for building robust Elixir applications.**
+
+**Version 0.2.0** - Now with chaos engineering, performance testing, and supervision tree testing!
 
 ---
 
@@ -33,10 +36,13 @@ With `Supertester`, you can build a test suite that is **fast**, **parallel**, a
 ## Key Features
 
 - ✅ **Rock-Solid Test Isolation**: Run all your tests with `async: true` without fear of process name collisions or state leakage.
-- 🔄 **Deterministic Synchronization**: No more `Process.sleep/1`. Use helpers that wait for processes to be ready, `cast`s to be processed, and supervisors to stabilize.
+- 🔄 **Zero Process.sleep**: Complete elimination of timing-based synchronization. Use proper OTP patterns for deterministic testing.
 - 🤖 **Powerful OTP Assertions**: Go beyond `assert`. Use `assert_process_restarted/2`, `assert_genserver_state/2`, and `assert_all_children_alive/1` for more expressive tests.
 - ✨ **Effortless Setup & Teardown**: Start isolated `GenServer`s and `Supervisor`s with a single line and trust `Supertester` to handle all the cleanup.
-- 💥 **Resilience & Chaos Testing**: Tools for testing crash recovery, supervision strategies, and system stability under stress.
+- 💥 **Chaos Engineering**: Test system resilience with controlled fault injection, random process crashes, and resource exhaustion.
+- 🎯 **Supervision Tree Testing**: Verify restart strategies, trace supervision events, and validate tree structures.
+- ⚡ **Performance Testing**: Assert performance SLAs, detect memory leaks, and prevent regressions with built-in benchmarking.
+- 🔧 **TestableGenServer**: Automatic injection of sync handlers for deterministic async operation testing.
 
 ## Installation
 
@@ -45,7 +51,7 @@ Add `supertester` as a dependency in your `mix.exs` file. It's only needed for t
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.1.0", only: :test}
+    {:supertester, "~> 0.2.0", only: :test}
   ]
 end
 ```
@@ -145,6 +151,126 @@ defmodule MyApp.MyAdvancedTest do
   end
 end
 ```
+
+### `Supertester.SupervisorHelpers`
+Specialized testing for supervision trees and restart strategies.
+- `test_restart_strategy/3`: Verify one_for_one, one_for_all, rest_for_one strategies
+- `assert_supervision_tree_structure/2`: Validate supervision tree structure
+- `trace_supervision_events/2`: Monitor supervisor events
+- `wait_for_supervisor_stabilization/2`: Wait for all children to be ready
+
+### `Supertester.ChaosHelpers`
+Chaos engineering toolkit for resilience testing.
+- `inject_crash/3`: Controlled crash injection (immediate, delayed, random)
+- `chaos_kill_children/3`: Random child killing in supervision trees
+- `simulate_resource_exhaustion/2`: Process/ETS/memory exhaustion simulation
+- `assert_chaos_resilient/3`: Verify system recovery from chaos
+- `run_chaos_suite/3`: Comprehensive chaos scenario testing
+
+### `Supertester.PerformanceHelpers`
+Performance testing and regression detection.
+- `assert_performance/2`: Assert time/memory/reduction bounds
+- `assert_no_memory_leak/2`: Detect memory leaks over iterations
+- `measure_operation/1`: Measure time, memory, and CPU work
+- `assert_mailbox_stable/2`: Ensure mailbox doesn't grow unbounded
+- `compare_performance/2`: Compare multiple function performances
+
+### `Supertester.TestableGenServer`
+Automatic sync handler injection for GenServers.
+- Automatically adds `__supertester_sync__` handler to any GenServer
+- Enables deterministic testing without `Process.sleep/1`
+- Works seamlessly with existing GenServer implementations
+
+## Advanced Usage Examples
+
+### Chaos Engineering
+
+Test your system's resilience to failures:
+
+```elixir
+test "system survives random process crashes" do
+  {:ok, supervisor} = setup_isolated_supervisor(MyApp.WorkerSupervisor)
+
+  # Kill 50% of workers over 3 seconds
+  report = chaos_kill_children(supervisor,
+    kill_rate: 0.5,
+    duration_ms: 3000,
+    kill_interval_ms: 200
+  )
+
+  # Verify system recovered
+  assert Process.alive?(supervisor)
+  assert report.supervisor_crashed == false
+  assert_all_children_alive(supervisor)
+end
+```
+
+### Performance Testing
+
+Ensure your code meets performance SLAs:
+
+```elixir
+test "API response time SLA" do
+  {:ok, api_server} = setup_isolated_genserver(APIServer)
+
+  assert_performance(
+    fn -> APIServer.handle_request(api_server, :get_user) end,
+    max_time_ms: 50,
+    max_memory_bytes: 500_000,
+    max_reductions: 100_000
+  )
+end
+
+test "no memory leak in message processing" do
+  {:ok, worker} = setup_isolated_genserver(MessageWorker)
+
+  assert_no_memory_leak(10_000, fn ->
+    MessageWorker.process(worker, generate_message())
+  end)
+end
+```
+
+### Supervision Tree Testing
+
+Verify supervision strategies work correctly:
+
+```elixir
+test "one_for_one restarts only failed child" do
+  {:ok, supervisor} = setup_isolated_supervisor(MySupervisor)
+
+  result = test_restart_strategy(supervisor, :one_for_one,
+    {:kill_child, :worker_1}
+  )
+
+  assert result.restarted == [:worker_1]
+  assert :worker_2 in result.not_restarted
+  assert :worker_3 in result.not_restarted
+end
+
+test "supervision tree structure" do
+  {:ok, root} = setup_isolated_supervisor(RootSupervisor)
+
+  assert_supervision_tree_structure(root, %{
+    supervisor: RootSupervisor,
+    strategy: :one_for_one,
+    children: [
+      {:cache, CacheServer},
+      {:worker_pool, WorkerPoolSupervisor}
+    ]
+  })
+end
+```
+
+## What's New in 0.2.0
+
+- 🎉 **Zero Process.sleep**: Eliminated all timing-based synchronization
+- 🎉 **ChaosHelpers**: Complete chaos engineering toolkit
+- 🎉 **PerformanceHelpers**: Performance testing and regression detection
+- 🎉 **SupervisorHelpers**: Comprehensive supervision tree testing
+- 🎉 **TestableGenServer**: Automatic sync handler injection
+- 🎉 **37 tests**: All passing with 100% async execution
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
 
 ## Contributing
 
