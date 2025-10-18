@@ -13,7 +13,7 @@
 
 **A battle-hardened OTP testing toolkit with chaos engineering, performance testing, and zero-sleep synchronization for building robust Elixir applications.**
 
-**Version 0.2.0** - Now with chaos engineering, performance testing, and supervision tree testing!
+**Version 0.2.1** - Now with chaos engineering, performance testing, and supervision tree testing!
 
 ---
 
@@ -51,7 +51,7 @@ Add `supertester` as a dependency in your `mix.exs` file. It's only needed for t
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.2.0", only: :test}
+    {:supertester, "~> 0.2.1", only: :test}
   ]
 end
 ```

@@ -1,7 +1,7 @@
 defmodule Supertester.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.2.1"
   @source_url "https://github.com/nshkrdotcom/supertester"
 
   def project do
@@ -61,7 +61,7 @@ defmodule Supertester.MixProject do
     [
       name: "supertester",
       description: description(),
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md MANUAL.md),
+      files: ~w(lib assets .formatter.exs mix.exs README.md LICENSE CHANGELOG.md MANUAL.md),
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,

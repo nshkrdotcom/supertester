@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-10-17
+
+### Fixed
+- Fixed missing logo asset in hex.pm package (404 error on hexdocs)
+  - Added `assets` directory to package files list in mix.exs
+  - Logo now correctly displays in HexDocs at https://hexdocs.pm/supertester
+
 ## [0.2.0] - 2025-10-07
 
 ### Added
@@ -87,5 +94,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
+[0.2.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.1.0
