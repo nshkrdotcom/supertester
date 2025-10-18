@@ -83,6 +83,8 @@ defmodule Supertester.MixProject do
       source_ref: "v#{@version}",
       source_url: @source_url,
       homepage_url: @source_url,
+      assets: %{"assets" => "assets"},
+      logo: "assets/supertester-logo.svg",
       extras: [
         "README.md",
         "MANUAL.md",
