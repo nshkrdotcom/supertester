@@ -47,9 +47,10 @@ defmodule Supertester.PerformanceHelpersTest do
         1 + 1
       end
 
+      # Memory delta is based on total VM usage, so allow a generous threshold to avoid noise.
       assert_performance(fast_op,
         max_time_ms: 100,
-        max_memory_bytes: 1_000_000
+        max_memory_bytes: 5_000_000
       )
     end
 

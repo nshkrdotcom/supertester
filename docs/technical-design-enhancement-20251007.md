@@ -1558,7 +1558,7 @@ end
 
 ```elixir
 # === Core Isolation ===
-use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+use Supertester.ExUnitFoundation, isolation: :full_isolation
 
 # === OTP Setup ===
 {:ok, server} = setup_isolated_genserver(MyServer, "test_context")
@@ -1617,9 +1617,8 @@ assert_no_process_leaks(fn -> operation() end)
 
 ```elixir
 defmodule MyApp.CounterPropertyTest do
-  use ExUnit.Case, async: true
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
   use ExUnitProperties
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
 
   import Supertester.{OTPHelpers, PropertyHelpers, Assertions}
 
@@ -1695,8 +1694,7 @@ end
 
 ```elixir
 defmodule MyApp.SystemResilienceTest do
-  use ExUnit.Case, async: false  # Chaos tests may need sequential execution
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation  # Adjust isolation/async as needed for chaos tests
 
   import Supertester.{OTPHelpers, ChaosHelpers, Assertions}
 
@@ -1777,8 +1775,7 @@ end
 
 ```elixir
 defmodule MyApp.PerformanceTest do
-  use ExUnit.Case, async: true
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   import Supertester.{OTPHelpers, PerformanceHelpers}
 
@@ -1859,8 +1856,7 @@ end
 
 ```elixir
 defmodule MyApp.DistributedTest do
-  use ExUnit.Case, async: false  # Distributed tests need sequential execution
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation  # Configure async settings per suite needs
 
   import Supertester.{DistributedHelpers, Assertions}
 
@@ -2107,8 +2103,7 @@ end
 #### After (Supertester Pattern)
 ```elixir
 defmodule MyApp.NewCounterTest do
-  use ExUnit.Case, async: true  # ✅ Can use async!
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation  # ✅ Runs async safely!
 
   import Supertester.{OTPHelpers, GenServerHelpers, Assertions}
 
@@ -2165,7 +2160,7 @@ end
 ### Migration Checklist
 
 - [ ] Replace `Process.sleep` with `cast_and_sync` or `wait_for_genserver_sync`
-- [ ] Add `use Supertester.UnifiedTestFoundation` with appropriate isolation
+- [ ] Add `use Supertester.ExUnitFoundation` with appropriate isolation
 - [ ] Replace manual `GenServer.start_link` with `setup_isolated_genserver`
 - [ ] Remove manual cleanup code (handled by isolation)
 - [ ] Change `async: false` to `async: true` where possible

@@ -1,4 +1,6 @@
 defmodule Supertester.GenServerHelpers do
+  require Logger
+
   @moduledoc """
   Specialized helpers for GenServer testing patterns.
 
@@ -108,23 +110,39 @@ defmodule Supertester.GenServerHelpers do
       {:ok, state} = get_server_state_safely(server)
       assert state.counter == 5
   """
-  @spec cast_and_sync(GenServer.server(), term(), term()) ::
+  @spec cast_and_sync(GenServer.server(), term(), term(), keyword()) ::
           :ok | {:ok, term()} | {:error, term()}
-  def cast_and_sync(server, cast_message, sync_message \\ :__supertester_sync__) do
+  def cast_and_sync(server, cast_message, sync_message \\ :__supertester_sync__, opts \\ []) do
+    strict? = Keyword.get(opts, :strict?, false)
+    sync_timeout = Keyword.get(opts, :timeout, 1000)
+
     try do
       :ok = GenServer.cast(server, cast_message)
 
       # Synchronize to ensure cast was processed
-      case GenServer.call(server, sync_message, 1000) do
-        :ok -> :ok
-        # Server doesn't handle sync message, but cast likely processed
-        {:error, :unknown_call} -> :ok
-        response -> {:ok, response}
+      case GenServer.call(server, sync_message, sync_timeout) do
+        :ok ->
+          :ok
+
+        {:error, :unknown_call} ->
+          handle_missing_sync(strict?, server, sync_message)
+
+        response ->
+          {:ok, response}
       end
     catch
-      :exit, {:noproc, _} -> {:error, :noproc}
-      :exit, {:timeout, _} -> {:error, :timeout}
-      :exit, reason -> {:error, reason}
+      :exit, {:noproc, _} ->
+        {:error, :noproc}
+
+      :exit, {:timeout, _} ->
+        {:error, :timeout}
+
+      :exit, reason ->
+        if missing_sync_exit?(reason, sync_message) do
+          handle_missing_sync(strict?, server, sync_message)
+        else
+          {:error, reason}
+        end
     end
   end
 
@@ -146,29 +164,52 @@ defmodule Supertester.GenServerHelpers do
       calls = [:get_counter, {:increment, 1}, :get_counter]
       {:ok, results} = concurrent_calls(server, calls, 5)
   """
-  @spec concurrent_calls(GenServer.server(), [term()], pos_integer()) ::
-          {:ok, [{term(), [term()]}]}
-  def concurrent_calls(server, calls, count \\ 10) do
+  @spec concurrent_calls(GenServer.server(), [term()], pos_integer(), keyword()) ::
+          {:ok, [map()]}
+  def concurrent_calls(server, calls, count \\ 10, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 5_000)
+
+    initial =
+      Enum.reduce(calls, %{}, fn call, acc ->
+        Map.put(acc, call, %{call: call, successes: [], errors: []})
+      end)
+
     tasks =
       for call <- calls,
-          _i <- 1..count do
+          _ <- 1..count do
         Task.async(fn ->
-          case call_with_timeout(server, call, 5000) do
-            {:ok, result} -> {call, {:ok, result}}
-            error -> {call, error}
+          case call_with_timeout(server, call, timeout) do
+            {:ok, response} -> {:ok, call, response}
+            {:error, reason} -> {:error, call, reason}
           end
         end)
       end
 
-    results =
+    aggregated =
       tasks
-      |> Task.await_many(10_000)
-      |> Enum.group_by(fn {call, _result} -> call end)
-      |> Enum.map(fn {call, results} ->
-        {call, Enum.map(results, fn {_call, result} -> result end)}
+      |> Task.await_many(timeout + 1_000)
+      |> Enum.reduce(initial, fn
+        {:ok, call, response}, acc ->
+          update_in(acc, [call, :successes], fn successes -> [response | successes] end)
+
+        {:error, call, reason}, acc ->
+          update_in(acc, [call, :errors], fn errors -> [reason | errors] end)
       end)
 
-    {:ok, results}
+    ordered =
+      calls
+      |> Enum.uniq()
+      |> Enum.map(fn call ->
+        entry = Map.fetch!(aggregated, call)
+
+        %{
+          call: entry.call,
+          successes: Enum.reverse(entry.successes),
+          errors: Enum.reverse(entry.errors)
+        }
+      end)
+
+    {:ok, ordered}
   end
 
   @doc """
@@ -193,25 +234,39 @@ defmodule Supertester.GenServerHelpers do
       ]
       {:ok, stats} = stress_test_server(server, operations, 10_000)
   """
-  @spec stress_test_server(GenServer.server(), [term()], pos_integer()) :: {:ok, map()}
-  def stress_test_server(server, operations, duration \\ 5000) do
+  @spec stress_test_server(GenServer.server(), [term()], pos_integer(), keyword()) ::
+          {:ok,
+           %{
+             calls: non_neg_integer,
+             casts: non_neg_integer,
+             errors: non_neg_integer,
+             duration_ms: non_neg_integer
+           }}
+  def stress_test_server(server, operations, duration \\ 5000, opts \\ []) do
+    worker_count = Keyword.get(opts, :workers, 5)
     start_time = System.monotonic_time(:millisecond)
     end_time = start_time + duration
 
-    parent = self()
-
-    # Start multiple workers
-    workers =
-      for _i <- 1..5 do
-        spawn_link(fn ->
-          stress_worker(server, operations, end_time, parent, 0, 0, 0)
-        end)
+    tasks =
+      for _ <- 1..worker_count do
+        Task.async(fn -> stress_worker(server, operations, end_time, 0, 0, 0) end)
       end
 
-    # Collect results
-    stats = collect_stress_results(workers, %{calls: 0, casts: 0, errors: 0})
+    stats =
+      tasks
+      |> Enum.reduce(%{calls: 0, casts: 0, errors: 0}, fn task, acc ->
+        worker_stats = Task.await(task, duration + 1_000)
 
-    {:ok, stats}
+        %{
+          calls: acc.calls + worker_stats.calls,
+          casts: acc.casts + worker_stats.casts,
+          errors: acc.errors + worker_stats.errors
+        }
+      end)
+
+    duration_ms = max(System.monotonic_time(:millisecond) - start_time, 0)
+
+    {:ok, Map.put(stats, :duration_ms, duration_ms)}
   end
 
   @doc """
@@ -321,7 +376,7 @@ defmodule Supertester.GenServerHelpers do
 
   # Private functions
 
-  defp stress_worker(server, operations, end_time, parent, calls, casts, errors) do
+  defp stress_worker(server, operations, end_time, calls, casts, errors) do
     current_time = System.monotonic_time(:millisecond)
 
     if current_time < end_time do
@@ -341,29 +396,9 @@ defmodule Supertester.GenServerHelpers do
             {calls, casts + 1, errors}
         end
 
-      stress_worker(server, operations, end_time, parent, new_calls, new_casts, new_errors)
+      stress_worker(server, operations, end_time, new_calls, new_casts, new_errors)
     else
-      send(parent, {:stress_result, self(), %{calls: calls, casts: casts, errors: errors}})
-    end
-  end
-
-  defp collect_stress_results([], acc), do: acc
-
-  defp collect_stress_results(workers, acc) do
-    receive do
-      {:stress_result, worker_pid, stats} ->
-        updated_acc = %{
-          calls: acc.calls + stats.calls,
-          casts: acc.casts + stats.casts,
-          errors: acc.errors + stats.errors
-        }
-
-        remaining_workers = List.delete(workers, worker_pid)
-        collect_stress_results(remaining_workers, updated_acc)
-    after
-      5000 ->
-        # Timeout waiting for workers
-        acc
+      %{calls: calls, casts: casts, errors: errors}
     end
   end
 
@@ -421,5 +456,32 @@ defmodule Supertester.GenServerHelpers do
           end
       end
     end
+  end
+
+  defp handle_missing_sync(true, server, sync_message) do
+    raise ArgumentError,
+          "GenServer #{inspect(server)} must handle #{inspect(sync_message)} to use cast_and_sync/4 in strict mode"
+  end
+
+  defp handle_missing_sync(false, server, sync_message) do
+    Logger.debug(fn ->
+      "GenServer #{inspect(server)} ignored sync message #{inspect(sync_message)}; assuming cast completed"
+    end)
+
+    :ok
+  end
+
+  defp missing_sync_exit?(%RuntimeError{message: message}, sync_message) do
+    contains_sync_message?(message, sync_message)
+  end
+
+  defp missing_sync_exit?({{%RuntimeError{message: message}, _stack}, _call_info}, sync_message) do
+    contains_sync_message?(message, sync_message)
+  end
+
+  defp missing_sync_exit?(_, _), do: false
+
+  defp contains_sync_message?(message, _sync_message) do
+    String.contains?(message, "handle_call")
   end
 end

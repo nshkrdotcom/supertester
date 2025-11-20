@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-11-19
+
+### Added
+- **Supertester.ExUnitFoundation** — drop-in ExUnit adapter that automatically wires `Supertester.UnifiedTestFoundation` isolation and sets async mode based on the selected strategy.
+- **Supertester.Env** and configurable environment behaviour, enabling custom harnesses to override how on-exit cleanup callbacks are registered.
+- **Supertester.IsolationContext** struct for consistent tracking of processes, ETS tables, cleanup callbacks, and contextual tags.
+- Dedicated tests covering the new Env abstraction, ExUnit adapter behaviour, and enhanced helpers.
+
+### Changed
+- `Supertester.UnifiedTestFoundation` now focuses purely on managing isolation contexts, exposes helpers to fetch/update those contexts, and registers cleanup via the new environment abstraction. The legacy macro now warns and delegates to the ExUnit adapter.
+- `Supertester.OTPHelpers` improved process tracking, derives deterministic names from the isolation context, traps exits to prevent linked process crashes from taking down tests, and returns richer error metadata when isolated processes fail to start.
+- `Supertester.GenServerHelpers` gained stricter `cast_and_sync/4`, structured `concurrent_calls/4` output, configurable timeouts, parallel stress-test workers, and better logging around missing sync handlers.
+- Documentation (README, MANUAL, API guide, technical design doc, etc.) updated to reflect the new ExUnit adapter, environment abstraction, and enhanced helper APIs.
+
+### Fixed
+- Stress tests now aggregate worker metrics reliably and include execution duration, avoiding missed worker exits.
+- `cast_and_sync/4` handles servers that raise when sync handlers are missing, providing clearer errors when `strict?: true` is enabled.
+
 ## [0.2.1] - 2025-10-17
 
 ### Fixed
@@ -94,6 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
+[0.3.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.0
 [0.2.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.1.0

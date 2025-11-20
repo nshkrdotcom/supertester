@@ -54,22 +54,16 @@ defmodule Supertester.OTPHelpers do
     # Separate init_args from GenServer options
     {init_args, genserver_opts} = Keyword.pop(server_opts, :init_args, [])
 
-    case GenServer.start_link(module, init_args, genserver_opts) do
+    case safe_start(:genserver, module, init_args, genserver_opts) do
       {:ok, pid} ->
-        # Register for cleanup
-        isolation_context = Process.get(:isolation_context, %{})
-        process_info = %{pid: pid, name: unique_name, module: module}
-        updated_processes = [process_info | Map.get(isolation_context, :processes, [])]
-        updated_context = Map.put(isolation_context, :processes, updated_processes)
-        Process.put(:isolation_context, updated_context)
-
-        # Setup automatic cleanup
+        track_process(%{pid: pid, name: Keyword.get(genserver_opts, :name), module: module})
         cleanup_on_exit(fn -> stop_genserver_safely(pid) end)
-
         {:ok, pid}
 
-      error ->
-        error
+      {:error, reason} ->
+        {:error,
+         {:start_failed,
+          build_failure_metadata(:genserver, module, genserver_opts, init_args, reason)}}
     end
   end
 
@@ -101,22 +95,16 @@ defmodule Supertester.OTPHelpers do
         _existing_name -> opts
       end
 
-    case Supervisor.start_link(module, opts, supervisor_opts) do
+    case safe_start(:supervisor, module, opts, supervisor_opts) do
       {:ok, pid} ->
-        # Register for cleanup
-        isolation_context = Process.get(:isolation_context, %{})
-        process_info = %{pid: pid, name: unique_name, module: module}
-        updated_processes = [process_info | Map.get(isolation_context, :processes, [])]
-        updated_context = Map.put(isolation_context, :processes, updated_processes)
-        Process.put(:isolation_context, updated_context)
-
-        # Setup automatic cleanup
+        track_process(%{pid: pid, name: Keyword.get(supervisor_opts, :name), module: module})
         cleanup_on_exit(fn -> stop_supervisor_safely(pid) end)
-
         {:ok, pid}
 
-      error ->
-        error
+      {:error, reason} ->
+        {:error,
+         {:start_failed,
+          build_failure_metadata(:supervisor, module, supervisor_opts, opts, reason)}}
     end
   end
 
@@ -281,19 +269,106 @@ defmodule Supertester.OTPHelpers do
   """
   @spec cleanup_on_exit((-> any())) :: :ok
   def cleanup_on_exit(cleanup_fun) when is_function(cleanup_fun, 0) do
-    # This function is meant to be used within test contexts where ExUnit.Callbacks is available
-    # The actual implementation will be injected by the test case
-    apply(ExUnit.Callbacks, :on_exit, [cleanup_fun])
+    Supertester.Env.on_exit(cleanup_fun)
   end
 
   # Private functions
 
-  defp generate_unique_process_name(module, test_name) do
-    module_name = module |> Module.split() |> List.last()
-    timestamp = System.unique_integer([:positive])
-    test_suffix = if test_name != "", do: "_#{test_name}", else: ""
+  defp safe_start(kind, module, init_args, opts) do
+    original_flag = Process.flag(:trap_exit, true)
 
-    :"#{module_name}#{test_suffix}_#{timestamp}"
+    result =
+      try do
+        case kind do
+          :genserver -> GenServer.start_link(module, init_args, opts)
+          :supervisor -> Supervisor.start_link(module, init_args, opts)
+        end
+      catch
+        :exit, reason -> {:error, reason}
+      after
+        if original_flag == false do
+          drain_exit_messages()
+        end
+
+        Process.flag(:trap_exit, original_flag)
+      end
+
+    result
+  end
+
+  defp track_process(process_info) do
+    if isolation_context = Supertester.UnifiedTestFoundation.fetch_isolation_context() do
+      isolation_context
+      |> Supertester.UnifiedTestFoundation.add_tracked_process(process_info)
+      |> Supertester.UnifiedTestFoundation.put_isolation_context()
+    end
+  end
+
+  defp build_failure_metadata(kind, module, opts, init_args, reason) do
+    %{
+      kind: kind,
+      module: module,
+      name: Keyword.get(opts, :name),
+      init_args: init_args,
+      reason: reason,
+      tags: failure_tags()
+    }
+  end
+
+  defp failure_tags do
+    case Supertester.UnifiedTestFoundation.fetch_isolation_context() do
+      %Supertester.IsolationContext{tags: tags} -> tags
+      _ -> %{}
+    end
+  end
+
+  defp drain_exit_messages do
+    receive do
+      {:EXIT, _pid, _reason} -> drain_exit_messages()
+    after
+      0 -> :ok
+    end
+  end
+
+  defp generate_unique_process_name(module, test_name) do
+    module_segment =
+      module
+      |> Module.split()
+      |> List.last()
+      |> normalize_segment()
+
+    logical_segment = normalize_segment(test_name)
+
+    case Supertester.UnifiedTestFoundation.fetch_isolation_context() do
+      %Supertester.IsolationContext{test_id: test_id} ->
+        [module_segment, logical_segment, normalize_segment(test_id)]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join("_")
+        |> String.to_atom()
+
+      _ ->
+        timestamp = System.unique_integer([:positive])
+
+        [module_segment, logical_segment, Integer.to_string(timestamp)]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join("_")
+        |> String.to_atom()
+    end
+  end
+
+  defp normalize_segment(nil), do: nil
+  defp normalize_segment(""), do: nil
+  defp normalize_segment(value) when is_atom(value), do: normalize_segment(Atom.to_string(value))
+
+  defp normalize_segment(value) do
+    value
+    |> to_string()
+    |> String.replace(~r/[^a-zA-Z0-9]+/, "_")
+    |> String.trim("_")
+    |> case do
+      "" -> nil
+      normalized -> normalized
+    end
   end
 
   defp stop_genserver_safely(pid) when is_pid(pid) do
@@ -309,6 +384,14 @@ defmodule Supertester.OTPHelpers do
 
   defp stop_supervisor_safely(pid) when is_pid(pid) do
     if Process.alive?(pid) do
+      Enum.each(Supervisor.which_children(pid), fn
+        {_id, child_pid, _type, _modules} when is_pid(child_pid) ->
+          stop_process_safely(%{pid: child_pid})
+
+        _ ->
+          :ok
+      end)
+
       try do
         Supervisor.stop(pid, :normal, 1000)
       catch
@@ -317,6 +400,8 @@ defmodule Supertester.OTPHelpers do
       end
     end
   end
+
+  defp stop_process_safely(%{pid: pid}) when is_pid(pid), do: stop_process_safely(pid)
 
   defp stop_process_safely(pid) when is_pid(pid) do
     if Process.alive?(pid) do

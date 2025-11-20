@@ -15,7 +15,9 @@ Welcome to the comprehensive user manual for Supertester. This document provides
 3.  [Installation](#installation)
 4.  [Core Modules](#core-modules)
     *   [`Supertester`](#supertester)
+    *   [`Supertester.ExUnitFoundation`](#supertesterexunitfoundation)
     *   [`Supertester.UnifiedTestFoundation`](#supertesterunifiedtestfoundation)
+    *   [`Supertester.Env`](#supertesterenv)
     *   [`Supertester.TestableGenServer`](#supertestertestablegenserver)
 5.  [OTP Testing Helpers](#otp-testing-helpers)
     *   [`Supertester.OTPHelpers`](#supertesterotphelpers)
@@ -48,7 +50,7 @@ This manual will guide you through the features and best practices for using Sup
 
 ### Test Isolation
 
-Supertester provides robust test isolation, allowing you to run your tests concurrently (`async: true`) without worrying about process name collisions or state leakage. This is achieved through the `UnifiedTestFoundation` module, which creates a sandboxed environment for each test.
+Supertester provides robust test isolation, allowing you to run your tests concurrently (`async: true`) without worrying about process name collisions or state leakage. This is achieved through the `Supertester.UnifiedTestFoundation` runtime and its ExUnit adapter, `Supertester.ExUnitFoundation`, which create a sandboxed environment for each test.
 
 ### Zero `Process.sleep`
 
@@ -95,30 +97,70 @@ Returns the current version of the Supertester library.
     #=> "0.2.0"
     ```
 
-### `Supertester.UnifiedTestFoundation`
+### `Supertester.ExUnitFoundation`
 
-This module provides the foundation for test isolation. It should be used in your test modules to enable Supertester's isolation features.
+This module is the drop-in ExUnit adapter for Supertester isolation. Replace `use ExUnit.Case` with it to automatically configure the appropriate async setting and install the isolation `setup` callback.
 
 **Usage:**
 
 ```elixir
 defmodule MyApp.MyTest do
-  use ExUnit.Case
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   test "an isolated test", context do
-    # The `context` will contain isolation information.
+    # `context.isolation_context` contains isolation information.
     # All processes started with Supertester helpers are tracked and cleaned up.
   end
 end
 ```
 
-**Isolation Modes:**
+**Isolation Modes (`:isolation` option):**
 
-*   `:basic`: Provides basic isolation with unique process naming.
-*   `:registry`: Uses a dedicated registry for process isolation.
-*   `:full_isolation`: Provides complete process and ETS table isolation. This is the recommended mode.
-*   `:contamination_detection`: Detects if a test leaks processes or ETS tables.
+*   `:basic`: Provides basic isolation with unique process naming (async-friendly).
+*   `:registry`: Uses a dedicated registry for process isolation (async-friendly).
+*   `:full_isolation`: Provides complete process and ETS table isolation. This is the recommended mode (async-friendly).
+*   `:contamination_detection`: Detects if a test leaks processes or ETS tables (runs synchronously).
+
+### `Supertester.UnifiedTestFoundation`
+
+`Supertester.UnifiedTestFoundation` now focuses on the isolation runtime itself. Use it directly when integrating Supertester with a custom harness or non-ExUnit environment. The legacy `use Supertester.UnifiedTestFoundation` macro is still available but emits a compile-time warning—prefer `Supertester.ExUnitFoundation` for ExUnit integration.
+
+**Manual usage example:**
+
+```elixir
+defmodule CustomHarnessTest do
+  use ExUnit.Case, async: true
+
+  setup context do
+    Supertester.UnifiedTestFoundation.setup_isolation(:full_isolation, context)
+  end
+
+  test "custom integration", context do
+    assert match?(%Supertester.IsolationContext{}, context.isolation_context)
+  end
+end
+```
+
+The value stored in `context.isolation_context` is a `%Supertester.IsolationContext{}` struct that captures the `test_id`, tracked processes, ETS tables, and contextual tags (module, test name, isolation mode, etc.), making it easy to log or inspect diagnostics.
+
+### `Supertester.Env`
+
+`Supertester.Env` abstracts how Supertester registers cleanup callbacks. By default it delegates to `ExUnit.Callbacks.on_exit/1`, but you can plug in a custom module (that implements the `Supertester.Env` behaviour) for other harnesses:
+
+```elixir
+defmodule MyHarness.Env do
+  @behaviour Supertester.Env
+
+  @impl true
+  def on_exit(fun) do
+    MyHarness.register_cleanup(fun)
+  end
+end
+
+# config/test.exs
+import Config
+config :supertester, :env_module, MyHarness.Env
+```
 
 ### `Supertester.TestableGenServer`
 
@@ -225,15 +267,21 @@ Fetches the state of a `GenServer` without crashing if the process is down.
     {:ok, state} = get_server_state_safely(server_pid)
     ```
 
-**`cast_and_sync(server, cast_message, sync_message \\ :__supertester_sync__)`**
+**`cast_and_sync(server, cast_message, sync_message \\ :__supertester_sync__, opts \\ [])`**
 
 Sends a `cast` message and then waits for a follow-up `call` to confirm the cast was processed. This is the recommended way to test async operations.
 
-*   **Signature:** `@spec cast_and_sync(GenServer.server(), term(), term()) :: :ok | {:ok, term()} | {:error, term()}`
+*   **Signature:** `@spec cast_and_sync(GenServer.server(), term(), term(), keyword()) :: :ok | {:ok, term()} | {:error, term()}`
+*   **Options:** `:strict?` (default `false`) raises when the target server doesn't implement the sync handler; `:timeout` to customize the sync call timeout.
 *   **Example:**
     ```elixir
     :ok = cast_and_sync(counter_pid, :increment)
     assert_genserver_state(counter_pid, fn state -> state.count == 1 end)
+
+    # Enforce the presence of the sync handler
+    assert_raise ArgumentError do
+      cast_and_sync(counter_pid, :increment, :__supertester_sync__, strict?: true)
+    end
     ```
 
 **`test_server_crash_recovery(server, crash_reason)`**
@@ -247,15 +295,19 @@ Simulates a process crash and verifies its recovery by its supervisor.
     assert info.recovered == true
     ```
 
-**`concurrent_calls(server, calls, count \\ 10)`**
+**`concurrent_calls(server, calls, count \\ 10, opts \\ [])`**
 
 Stress-tests a `GenServer` with many concurrent requests.
 
-*   **Signature:** `@spec concurrent_calls(GenServer.server(), [term()], pos_integer()) :: {:ok, [{term(), [term()]}]}`
+*   **Signature:** `@spec concurrent_calls(GenServer.server(), [term()], pos_integer(), keyword()) :: {:ok, [map()]}` (`opts[:timeout]` controls the per-call timeout)
 *   **Example:**
     ```elixir
     calls = [:get_counter, {:increment, 1}]
-    {:ok, results} = concurrent_calls(server_pid, calls, 20)
+    {:ok, results} = concurrent_calls(server_pid, calls, 20, timeout: 50)
+
+    Enum.each(results, fn %{call: call, successes: successes, errors: errors} ->
+      IO.inspect({call, length(successes), length(errors)})
+    end)
     ```
 
 ### `Supertester.SupervisorHelpers`
@@ -560,7 +612,7 @@ end
 
 ## Best Practices
 
-1.  **Always Use Isolation:** Start your test modules with `use Supertester.UnifiedTestFoundation, isolation: :full_isolation`.
+1.  **Always Use Isolation:** Start your test modules with `use Supertester.ExUnitFoundation, isolation: :full_isolation`.
 2.  **Prefer `setup_isolated_*`:** Use `setup_isolated_genserver` and `setup_isolated_supervisor` to ensure automatic cleanup and unique naming.
 3.  **Avoid `Process.sleep`:** Use `cast_and_sync` for asynchronous operations and `wait_for_*` helpers for other synchronization needs.
 4.  **Use Expressive Assertions:** Leverage the custom assertions in `Supertester.Assertions` to make your tests clearer and more concise.

@@ -276,7 +276,7 @@ import Supertester.{
 Always use isolation for parallel tests:
 
 ```elixir
-use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+use Supertester.ExUnitFoundation, isolation: :full_isolation
 ```
 
 ### 2. No Process.sleep

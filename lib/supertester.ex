@@ -7,7 +7,8 @@ defmodule Supertester do
 
   ## Core Modules
 
-  - `Supertester.UnifiedTestFoundation` - Test isolation and foundation patterns
+  - `Supertester.ExUnitFoundation` - ExUnit adapter that wires in Supertester isolation
+  - `Supertester.UnifiedTestFoundation` - Test isolation runtime for custom harnesses
   - `Supertester.OTPHelpers` - OTP-compliant testing utilities
   - `Supertester.GenServerHelpers` - GenServer-specific test patterns
   - `Supertester.SupervisorHelpers` - Supervision tree testing utilities
@@ -30,7 +31,7 @@ defmodule Supertester do
   Then use the helpers in your tests:
 
       defmodule MyApp.MyModuleTest do
-        use ExUnit.Case, async: true
+        use Supertester.ExUnitFoundation, isolation: :full_isolation
         import Supertester.OTPHelpers
         import Supertester.Assertions
 

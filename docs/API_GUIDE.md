@@ -28,23 +28,22 @@ Supertester.version()
 # => "0.2.0"
 ```
 
-### Supertester.UnifiedTestFoundation
+### Supertester.ExUnitFoundation
 
-Provides multiple isolation modes for test execution.
+Drop-in ExUnit adapter that configures isolation automatically.
 
-#### Isolation Modes
+#### Isolation Modes (`:isolation` option)
 
-- **`:basic`** - Basic isolation with unique naming
-- **`:registry`** - Registry-based process isolation
-- **`:full_isolation`** - Complete process and ETS isolation (recommended)
-- **`:contamination_detection`** - Isolation with leak detection
+- **`:basic`** – Basic isolation with unique naming (async-friendly)
+- **`:registry`** – Registry-based process isolation (async-friendly)
+- **`:full_isolation`** – Complete process and ETS isolation (recommended, async-friendly)
+- **`:contamination_detection`** – Isolation with leak detection (runs synchronously)
 
 #### Usage
 
 ```elixir
 defmodule MyApp.MyTest do
-  use ExUnit.Case
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   test "isolated test", context do
     # context.isolation_context contains isolation info
@@ -52,6 +51,37 @@ defmodule MyApp.MyTest do
     # Test runs in complete isolation
   end
 end
+```
+
+### Supertester.UnifiedTestFoundation
+
+Isolation runtime powering Supertester. Use it directly for custom harnesses or non-ExUnit integrations. The legacy `use Supertester.UnifiedTestFoundation` macro delegates to `Supertester.ExUnitFoundation` and emits a warning.
+
+```elixir
+defmodule CustomHarnessTest do
+  use ExUnit.Case, async: true
+
+  setup context do
+    Supertester.UnifiedTestFoundation.setup_isolation(:full_isolation, context)
+  end
+end
+```
+
+### Supertester.Env
+
+Environment abstraction used to register cleanup callbacks. The default implementation uses `ExUnit.Callbacks.on_exit/1`, but you can configure a custom module that implements the `Supertester.Env` behaviour:
+
+```elixir
+defmodule MyHarness.Env do
+  @behaviour Supertester.Env
+
+  @impl true
+  def on_exit(fun), do: MyHarness.register_cleanup(fun)
+end
+
+# config/test.exs
+import Config
+config :supertester, :env_module, MyHarness.Env
 ```
 
 ### Supertester.TestableGenServer
@@ -186,12 +216,12 @@ Safely retrieves GenServer state without crashing.
 assert state.counter == 5
 ```
 
-#### cast_and_sync/3
+#### cast_and_sync/4
 
 Sends a cast and synchronizes to ensure processing.
 
 ```elixir
-@spec cast_and_sync(GenServer.server(), term(), term()) ::
+@spec cast_and_sync(GenServer.server(), term(), term(), keyword()) ::
         :ok | {:ok, term()} | {:error, term()}
 ```
 
@@ -208,14 +238,37 @@ assert state.counter == 5
 Stress-tests GenServer with concurrent calls.
 
 ```elixir
-@spec concurrent_calls(GenServer.server(), [term()], pos_integer()) ::
-        {:ok, [{term(), [term()]}]}
+@spec concurrent_calls(GenServer.server(), [term()], pos_integer(), keyword()) ::
+        {:ok, [map()]}
 ```
 
 **Example**:
 ```elixir
-{:ok, results} = concurrent_calls(server, [:increment, :decrement], 10)
-# 10 concurrent processes per operation
+{:ok, results} = concurrent_calls(server, [:increment, :decrement], 10, timeout: 20)
+
+for %{call: call, successes: successes, errors: errors} <- results do
+  IO.inspect({call, successes, errors})
+end
+```
+
+#### stress_test_server/4
+
+Runs a short stress scenario with mixed calls and casts.
+
+```elixir
+@spec stress_test_server(GenServer.server(), [term()], pos_integer(), keyword()) ::
+        {:ok, %{calls: non_neg_integer, casts: non_neg_integer, errors: non_neg_integer, duration_ms: non_neg_integer}}
+```
+
+**Example**:
+```elixir
+operations = [
+  {:call, :get_state},
+  {:cast, {:queue_job, payload()}}
+]
+
+{:ok, report} = stress_test_server(server, operations, 1_000, workers: 4)
+assert report.errors == 0
 ```
 
 #### test_server_crash_recovery/2
@@ -852,7 +905,7 @@ end
 ### 1. Always Use Isolation
 
 ```elixir
-use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+use Supertester.ExUnitFoundation, isolation: :full_isolation
 ```
 
 ### 2. Use setup_isolated_* Functions
@@ -921,8 +974,7 @@ When writing tests for code that uses Supertester:
 
 ```elixir
 defmodule MyApp.MyModuleTest do
-  use ExUnit.Case, async: true
-  use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   import Supertester.{OTPHelpers, Assertions}
 

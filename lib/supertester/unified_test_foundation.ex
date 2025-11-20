@@ -1,9 +1,12 @@
 defmodule Supertester.UnifiedTestFoundation do
-  @moduledoc """
-  Unified test foundation providing multiple isolation modes for OTP testing.
+  alias Supertester.{Env, IsolationContext}
 
-  This module provides macros and utilities to establish different levels of test isolation,
-  enabling async testing while preventing process conflicts and ensuring proper cleanup.
+  @moduledoc """
+  Isolation runtime for OTP-heavy tests.
+
+  This module configures and maintains isolation contexts that can be plugged into any
+  test harness. Use `Supertester.ExUnitFoundation` for the ready-made ExUnit adapter, or
+  call the functions in this module directly from custom harnesses.
 
   ## Isolation Modes
 
@@ -12,37 +15,33 @@ defmodule Supertester.UnifiedTestFoundation do
   - `:full_isolation` - Complete process and ETS isolation
   - `:contamination_detection` - Isolation with contamination detection
 
-  ## Usage
+  ## Usage with ExUnit
 
       defmodule MyApp.MyModuleTest do
-        use ExUnit.Case
-        use Supertester.UnifiedTestFoundation, isolation: :full_isolation
+        use Supertester.ExUnitFoundation, isolation: :full_isolation
 
         test "my test", context do
           # Test runs with full isolation
         end
       end
+
+  ## Usage with custom harnesses
+
+      :ok = Supertester.UnifiedTestFoundation.setup_isolation(:full_isolation, context)
   """
 
   @doc """
-  Provides test isolation setup based on the specified isolation type.
+  Deprecated macro maintained for backwards compatibility.
   """
   defmacro __using__(opts) do
-    isolation_type = Keyword.get(opts, :isolation, :basic)
+    IO.warn(
+      "Supertester.UnifiedTestFoundation now only manages isolation. For ExUnit integration, use Supertester.ExUnitFoundation.",
+      Macro.Env.stacktrace(__CALLER__)
+    )
 
     quote do
       import Supertester.UnifiedTestFoundation
-
-      setup context do
-        Supertester.UnifiedTestFoundation.setup_isolation(unquote(isolation_type), context)
-      end
-
-      # Determine if tests can run async based on isolation type
-      if Supertester.UnifiedTestFoundation.isolation_allows_async?(unquote(isolation_type)) do
-        use ExUnit.Case, async: true
-      else
-        use ExUnit.Case, async: false
-      end
+      use Supertester.ExUnitFoundation, unquote(opts)
     end
   end
 
@@ -64,6 +63,48 @@ defmodule Supertester.UnifiedTestFoundation do
       :contamination_detection ->
         setup_contamination_detection(context)
     end
+  end
+
+  @doc """
+  Fetches the isolation context stored in the current process.
+  """
+  @spec fetch_isolation_context() :: IsolationContext.t() | nil
+  def fetch_isolation_context do
+    Process.get(:isolation_context)
+  end
+
+  @doc """
+  Stores the isolation context in the current process.
+  """
+  @spec put_isolation_context(IsolationContext.t() | nil) :: IsolationContext.t() | nil
+  def put_isolation_context(context) do
+    Process.put(:isolation_context, context)
+    context
+  end
+
+  @doc """
+  Adds a tracked process to the isolation context.
+  """
+  @spec add_tracked_process(IsolationContext.t(), IsolationContext.process_info()) ::
+          IsolationContext.t()
+  def add_tracked_process(%IsolationContext{} = ctx, process_info) when is_map(process_info) do
+    %{ctx | processes: [process_info | ctx.processes]}
+  end
+
+  @doc """
+  Adds a tracked ETS table to the isolation context.
+  """
+  @spec add_tracked_ets_table(IsolationContext.t(), term()) :: IsolationContext.t()
+  def add_tracked_ets_table(%IsolationContext{} = ctx, table) do
+    %{ctx | ets_tables: [table | ctx.ets_tables]}
+  end
+
+  @doc """
+  Adds a cleanup callback to the isolation context.
+  """
+  @spec add_cleanup_callback(IsolationContext.t(), (-> any())) :: IsolationContext.t()
+  def add_cleanup_callback(%IsolationContext{} = ctx, callback) when is_function(callback, 0) do
+    %{ctx | cleanup_callbacks: [callback | ctx.cleanup_callbacks]}
   end
 
   @doc """
@@ -89,11 +130,13 @@ defmodule Supertester.UnifiedTestFoundation do
   """
   @spec verify_test_isolation(map()) :: boolean()
   def verify_test_isolation(context) do
-    isolation_context = Map.get(context, :isolation_context, %{})
+    case Map.get(context, :isolation_context) do
+      %IsolationContext{processes: processes} ->
+        Enum.all?(processes, fn %{pid: pid} -> Process.alive?(pid) end)
 
-    # Verify all processes are still running and isolated
-    processes = Map.get(isolation_context, :processes, [])
-    Enum.all?(processes, fn %{pid: pid} -> Process.alive?(pid) end)
+      _ ->
+        true
+    end
   end
 
   @doc """
@@ -109,80 +152,86 @@ defmodule Supertester.UnifiedTestFoundation do
   # Private functions
 
   defp setup_basic_isolation(context) do
-    test_id = generate_test_id(context)
-
-    isolation_context = %{
-      test_id: test_id,
-      processes: [],
-      cleanup_callbacks: []
-    }
-
-    apply(ExUnit.Callbacks, :on_exit, [fn -> cleanup_isolation(isolation_context) end])
-
-    {:ok, Map.put(context, :isolation_context, isolation_context)}
+    {isolation_context, _test_id} = build_isolation_context(context, :basic)
+    register_cleanup(isolation_context)
+    {:ok, attach_context(context, isolation_context)}
   end
 
   defp setup_registry_isolation(context) do
-    test_id = generate_test_id(context)
+    {isolation_context, test_id} = build_isolation_context(context, :registry)
     registry_name = :"test_registry_#{test_id}"
 
     {:ok, _} = Registry.start_link(keys: :unique, name: registry_name)
 
-    isolation_context = %{
-      test_id: test_id,
-      registry: registry_name,
-      processes: [],
-      cleanup_callbacks: [fn -> GenServer.stop(registry_name) end]
-    }
+    isolation_context =
+      isolation_context
+      |> Map.put(:registry, registry_name)
+      |> add_cleanup_callback(fn -> GenServer.stop(registry_name) end)
 
-    apply(ExUnit.Callbacks, :on_exit, [fn -> cleanup_isolation(isolation_context) end])
+    register_cleanup(isolation_context)
 
-    {:ok, Map.put(context, :isolation_context, isolation_context)}
+    {:ok, attach_context(context, isolation_context)}
   end
 
   defp setup_full_isolation(context) do
-    test_id = generate_test_id(context)
+    {isolation_context, test_id} = build_isolation_context(context, :full_isolation)
     registry_name = :"test_registry_#{test_id}"
 
     {:ok, _} = Registry.start_link(keys: :unique, name: registry_name)
 
-    isolation_context = %{
-      test_id: test_id,
-      registry: registry_name,
-      processes: [],
-      ets_tables: [],
-      cleanup_callbacks: [fn -> GenServer.stop(registry_name) end]
-    }
+    isolation_context =
+      isolation_context
+      |> Map.put(:registry, registry_name)
+      |> add_cleanup_callback(fn -> GenServer.stop(registry_name) end)
 
-    apply(ExUnit.Callbacks, :on_exit, [fn -> cleanup_isolation(isolation_context) end])
+    register_cleanup(isolation_context)
 
-    {:ok, Map.put(context, :isolation_context, isolation_context)}
+    {:ok, attach_context(context, isolation_context)}
   end
 
   defp setup_contamination_detection(context) do
+    {isolation_context, _test_id} = build_isolation_context(context, :contamination_detection)
+
+    isolation_context =
+      isolation_context
+      |> Map.put(:initial_processes, Process.list())
+      |> Map.put(:initial_ets_tables, :ets.all())
+
+    register_cleanup(isolation_context, fn ctx ->
+      check_contamination(ctx)
+      cleanup_isolation(ctx)
+    end)
+
+    {:ok, attach_context(context, isolation_context)}
+  end
+
+  defp build_isolation_context(context, isolation_type) do
     test_id = generate_test_id(context)
+    tags = build_context_tags(context, test_id, isolation_type)
+    {%IsolationContext{test_id: test_id, tags: tags}, test_id}
+  end
 
-    # Capture initial system state
-    initial_processes = Process.list()
-    initial_ets_tables = :ets.all()
+  defp attach_context(context, isolation_context) do
+    put_isolation_context(isolation_context)
+    Map.put(context, :isolation_context, isolation_context)
+  end
 
-    isolation_context = %{
-      test_id: test_id,
-      initial_processes: initial_processes,
-      initial_ets_tables: initial_ets_tables,
-      processes: [],
-      ets_tables: [],
-      cleanup_callbacks: []
-    }
+  defp register_cleanup(isolation_context, fun \\ &cleanup_isolation/1) do
+    Env.on_exit(fn ->
+      ctx = fetch_isolation_context() || isolation_context
+      fun.(ctx)
+      put_isolation_context(nil)
+    end)
+  end
 
-    apply(ExUnit.Callbacks, :on_exit, [
-      fn ->
-        check_contamination(isolation_context)
-        cleanup_isolation(isolation_context)
+  defp build_context_tags(context, test_id, isolation_type) do
+    [:module, :test, :file, :line]
+    |> Enum.reduce(%{isolation: isolation_type, test_id: test_id}, fn key, acc ->
+      case Map.get(context, key) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
       end
-    ])
-
-    {:ok, Map.put(context, :isolation_context, isolation_context)}
+    end)
   end
 
   defp generate_test_id(context) do
@@ -197,25 +246,22 @@ defmodule Supertester.UnifiedTestFoundation do
     String.to_atom("#{test_name}_#{timestamp}")
   end
 
-  defp cleanup_isolation(isolation_context) do
-    # Stop all tracked processes
-    isolation_context
-    |> Map.get(:processes, [])
+  defp cleanup_isolation(nil), do: :ok
+
+  defp cleanup_isolation(%IsolationContext{} = isolation_context) do
+    isolation_context.processes
     |> Enum.each(&stop_process_safely/1)
 
-    # Clean up ETS tables
-    isolation_context
-    |> Map.get(:ets_tables, [])
+    isolation_context.ets_tables
     |> Enum.each(&delete_ets_table_safely/1)
 
-    # Run cleanup callbacks
-    isolation_context
-    |> Map.get(:cleanup_callbacks, [])
-    |> Enum.each(fn callback ->
+    Enum.each(isolation_context.cleanup_callbacks, fn callback ->
       try do
         callback.()
       rescue
         _ -> :ok
+      catch
+        :exit, _ -> :ok
       end
     end)
   end
@@ -241,26 +287,25 @@ defmodule Supertester.UnifiedTestFoundation do
     end
   end
 
-  defp check_contamination(isolation_context) do
+  defp check_contamination(nil), do: :ok
+
+  defp check_contamination(%IsolationContext{} = isolation_context) do
     current_processes = Process.list()
     current_ets_tables = :ets.all()
 
-    initial_processes = Map.get(isolation_context, :initial_processes, [])
-    initial_ets_tables = Map.get(isolation_context, :initial_ets_tables, [])
+    tracked_processes = Enum.map(isolation_context.processes, & &1.pid)
 
-    # Check for process leaks
-    new_processes = current_processes -- initial_processes
-    leaked_processes = new_processes -- Map.get(isolation_context, :processes, [])
+    new_processes = current_processes -- isolation_context.initial_processes
+    leaked_processes = new_processes -- tracked_processes
 
-    # Check for ETS table leaks  
-    new_ets_tables = current_ets_tables -- initial_ets_tables
-    leaked_ets_tables = new_ets_tables -- Map.get(isolation_context, :ets_tables, [])
+    new_ets_tables = current_ets_tables -- isolation_context.initial_ets_tables
+    leaked_ets_tables = new_ets_tables -- isolation_context.ets_tables
 
-    if length(leaked_processes) > 0 or length(leaked_ets_tables) > 0 do
+    if leaked_processes != [] or leaked_ets_tables != [] do
       require Logger
 
       Logger.warning(
-        "Test contamination detected - leaked processes: #{inspect(leaked_processes)}, leaked ETS tables: #{inspect(leaked_ets_tables)}"
+        "Test contamination detected for #{inspect(isolation_context.tags)} - leaked processes: #{inspect(leaked_processes)}, leaked ETS tables: #{inspect(leaked_ets_tables)}"
       )
     end
   end

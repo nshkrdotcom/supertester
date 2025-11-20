@@ -13,7 +13,7 @@
 
 **A battle-hardened OTP testing toolkit with chaos engineering, performance testing, and zero-sleep synchronization for building robust Elixir applications.**
 
-**Version 0.2.1** - Now with chaos engineering, performance testing, and supervision tree testing!
+**Version 0.3.0** - Now with ExUnit adapter, environment abstraction, and enhanced GenServer helpers!
 
 ---
 
@@ -51,7 +51,7 @@ Add `supertester` as a dependency in your `mix.exs` file. It's only needed for t
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.2.1", only: :test}
+    {:supertester, "~> 0.3.0", only: :test}
   ]
 end
 ```
@@ -87,7 +87,7 @@ end
 ```elixir
 # test/my_app/counter_test.exs
 defmodule MyApp.CounterTest do
-  use ExUnit.Case, async: true # <-- Fully parallel!
+  use Supertester.ExUnitFoundation, isolation: :full_isolation # <-- Fully parallel!
 
   # Import the tools you need
   import Supertester.OTPHelpers
@@ -111,7 +111,9 @@ end
 
 `Supertester` is organized into several powerful modules, each targeting a specific area of OTP testing.
 
-- **`Supertester.UnifiedTestFoundation`**: The cornerstone of test isolation. Use it in your test cases to create a sandboxed environment, enabling safe concurrent testing with automatic cleanup of processes and ETS tables.
+- **`Supertester.ExUnitFoundation`**: Drop-in `ExUnit.Case` adapter that enables Supertester isolation with a single `use`, automatically configuring async support per isolation mode.
+
+- **`Supertester.UnifiedTestFoundation`**: The isolation runtime powering Supertester. Call it directly from custom harnesses or advanced setups where you don’t want to use the ExUnit adapter.
 
 - **`Supertester.TestableGenServer`**: A simple behavior to make your `GenServer`s more testable. It automatically injects handlers to allow deterministic synchronization in your tests, completely eliminating the need for `Process.sleep/1`.
 
