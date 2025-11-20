@@ -138,22 +138,27 @@ defmodule Supertester.PerformanceHelpersTest do
     end
   end
 
-  describe "measure_mailbox_growth/2" do
+  describe "measure_mailbox_growth/3" do
     test "measures mailbox size during operation" do
       {:ok, worker} = FastWorker.start_link()
 
       report =
-        measure_mailbox_growth(worker, fn ->
-          # Send many cast messages
-          for _ <- 1..100 do
-            GenServer.cast(worker, :ignored_message)
-          end
-        end)
+        measure_mailbox_growth(
+          worker,
+          fn ->
+            # Send many cast messages
+            for _ <- 1..100 do
+              GenServer.cast(worker, :ignored_message)
+            end
+          end,
+          sampling_interval: 2
+        )
 
       assert Map.has_key?(report, :initial_size)
       assert Map.has_key?(report, :final_size)
       assert Map.has_key?(report, :max_size)
       assert Map.has_key?(report, :avg_size)
+      assert is_list(report.result)
     end
 
     test "detects mailbox growth" do

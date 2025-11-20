@@ -1,7 +1,7 @@
 defmodule Supertester.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.3.1"
   @source_url "https://github.com/nshkrdotcom/supertester"
 
   def project do
@@ -35,6 +35,7 @@ defmodule Supertester.MixProject do
   defp deps do
     [
       {:stream_data, "~> 1.0", optional: true},
+      {:telemetry, "~> 1.0"},
       {:benchee, "~> 1.3", only: :test, runtime: false},
       {:ex_doc, "~> 0.27", only: :dev, runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
@@ -109,6 +110,14 @@ defmodule Supertester.MixProject do
           Supertester.ExUnitFoundation,
           Supertester.UnifiedTestFoundation,
           Supertester.TestableGenServer
+        ],
+        "Concurrency Harness": [
+          Supertester.ConcurrentHarness,
+          Supertester.PropertyHelpers,
+          Supertester.MessageHarness
+        ],
+        "Telemetry & Diagnostics": [
+          Supertester.Telemetry
         ],
         "OTP Testing": [
           Supertester.OTPHelpers,

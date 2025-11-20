@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.3.1] - 2025-11-19
+
+### Added
+- **Supertester.ConcurrentHarness** providing a scenario-based runner with thread scripts, invariants, structured event reporting, and optional mailbox metrics.
+- **Supertester.PropertyHelpers** exposing `genserver_operation_sequence/2` and `concurrent_scenario/1` generators that emit configs consumed by the concurrent harness or property-based tests.
+- **Supertester.MessageHarness** with `trace_messages/3` for lightweight mailbox visibility during any operation.
+- Regression tests covering the new harness layer, message tracing utility, and property generators (when `:stream_data` is available).
+- **Supertester.Telemetry** centralized module plus global `:telemetry` dependency, enabling harness lifecycle, chaos, mailbox, and performance events out of the box.
+- ConcurrentHarness chaos helpers (`chaos_kill_children/1`, `chaos_inject_crash/2`) and `run_with_performance/2` helper for composing richer scenarios.
+- `ChaosHelpers.run_chaos_suite/3` can now consume full `Supertester.ConcurrentHarness` scenarios (via `:concurrent` entries), consolidating telemetry and reporting across chaos suites.
+
+### Changed
+- `PerformanceHelpers.measure_mailbox_growth/3` now accepts options (sampling interval) and returns the wrapped operation result so higher-level APIs can forward diagnostics.
+- `assert_mailbox_stable/2` forwards extra options to the new mailbox measurement signature, enabling finer-grained monitoring from tests and the concurrent harness.
+- ConcurrentHarness integrates optional chaos hooks, performance expectations, and emits telemetry events for scenario start/stop and diagnostics.
+
+### Fixed
+- Documentation now reflects the new concurrent harness and mailbox utilities, replacing stale references to planned modules that did not yet exist.
+
 ## [0.3.0] - 2025-11-19
 
 ### Added
@@ -112,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
+[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.1
 [0.3.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.0
 [0.2.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.2.0

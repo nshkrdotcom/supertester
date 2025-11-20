@@ -13,7 +13,7 @@
 
 **A battle-hardened OTP testing toolkit with chaos engineering, performance testing, and zero-sleep synchronization for building robust Elixir applications.**
 
-**Version 0.3.0** - Now with ExUnit adapter, environment abstraction, and enhanced GenServer helpers!
+**Version 0.3.1** - Now with concurrent harness, telemetry instrumentation, and chaos-aware mailbox tooling!
 
 ---
 
@@ -43,6 +43,8 @@ With `Supertester`, you can build a test suite that is **fast**, **parallel**, a
 - 🎯 **Supervision Tree Testing**: Verify restart strategies, trace supervision events, and validate tree structures.
 - ⚡ **Performance Testing**: Assert performance SLAs, detect memory leaks, and prevent regressions with built-in benchmarking.
 - 🔧 **TestableGenServer**: Automatic injection of sync handlers for deterministic async operation testing.
+- 🧵 **Concurrent Harness**: Describe multi-threaded scenarios once and let Supertester orchestrate calls, casts, chaos hooks, performance checks, and mailbox monitoring without extra glue.
+- 📊 **Telemetry Built-In**: Structured `:telemetry` events for scenario start/stop, mailbox sampling, chaos injections, and performance metrics so observability does not become an afterthought.
 
 ## Installation
 
@@ -51,7 +53,7 @@ Add `supertester` as a dependency in your `mix.exs` file. It's only needed for t
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.3.0", only: :test}
+    {:supertester, "~> 0.3.1", only: :test}
   ]
 end
 ```
@@ -123,6 +125,14 @@ end
 
 - **`Supertester.SupervisorHelpers`**: A dedicated toolkit for testing the backbone of OTP applications: supervisors. You can verify restart strategies, validate supervision tree structures, and trace supervision events to ensure your application is truly fault-tolerant.
 
+- **`Supertester.ConcurrentHarness`**: Compose complex concurrent scenarios declaratively. Provide thread scripts, invariants, optional chaos hooks, performance expectations, and mailbox monitoring, then receive a structured report plus telemetry events for each run.
+
+- **`Supertester.PropertyHelpers`**: Build `StreamData` generators that output ready-to-run concurrency scenarios. Feed them into `ConcurrentHarness` for property-based testing of GenServers and supervisors.
+
+- **`Supertester.MessageHarness`**: Trace messages delivered to any process while executing a function. Perfect for debugging mailbox growth or validating ordering without invasive instrumentation.
+
+- **`Supertester.Telemetry`**: Single entry point for emitting `:telemetry` events with the `[:supertester | ...]` prefix, covering scenario lifecycle, chaos hooks, mailbox samples, and performance measurements so you can plug into dashboards with minimal wiring.
+
 - **`Supertester.ChaosHelpers`**: Unleash controlled chaos to test your system's resilience. This module allows you to inject faults, kill random processes, and simulate resource exhaustion to ensure your system can withstand turbulent conditions.
 
 - **`Supertester.PerformanceHelpers`**: Integrate performance testing directly into your test suite. Assert that your code meets performance SLAs, detect memory leaks, and prevent performance regressions before they hit production.
@@ -151,6 +161,29 @@ test "system survives random process crashes" do
   assert report.supervisor_crashed == false
   assert_all_children_alive(supervisor)
 end
+
+```
+
+```elixir
+
+# Mix chaos scenarios with concurrent harness runs
+suite = [
+  %{type: :kill_children, kill_rate: 0.3, duration_ms: 500},
+  %{
+    type: :concurrent,
+    build: fn sup ->
+      Supertester.ConcurrentHarness.simple_genserver_scenario(
+        MyWorker,
+        [{:cast, :do_work}, {:call, :get_state}],
+        4,
+        setup: fn -> {:ok, sup, %{}} end,
+        cleanup: fn _, _ -> :ok end
+      )
+    end
+  }
+]
+
+report = run_chaos_suite(supervisor, suite)
 ```
 
 ### Performance Testing
@@ -244,3 +277,37 @@ Contributions are welcome! If you'd like to help improve `Supertester`, please f
 ## License
 
 This project is licensed under the MIT License.
+### Concurrency Harness + Chaos + Telemetry
+
+```elixir
+test "counter stays non-negative under chaos" do
+  scenario =
+    Supertester.ConcurrentHarness.simple_genserver_scenario(
+      CounterServer,
+      [{:cast, :increment}, {:cast, :decrement}],
+      5,
+      chaos: Supertester.ConcurrentHarness.chaos_kill_children(kill_rate: 0.2, duration_ms: 500),
+      performance_expectations: [max_time_ms: 100],
+      mailbox: [sampling_interval: 2],
+      metadata: %{test: "counter chaos"}
+    )
+
+  assert {:ok, report} = Supertester.ConcurrentHarness.run(scenario)
+  assert report.metrics.total_operations == length(report.events)
+  assert report.chaos
+  assert report.performance.time_us
+end
+```
+
+Attach to the telemetry events in your umbrella app:
+
+```elixir
+:telemetry.attach(
+  "supertester",
+  [:supertester, :concurrent, :scenario, :stop],
+  fn _event, %{duration_ms: duration}, metadata, _ ->
+    Logger.info("[supertester] scenario #{metadata.scenario_id} finished in #{duration}ms")
+  end,
+  nil
+)
+```

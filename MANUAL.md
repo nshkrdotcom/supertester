@@ -27,16 +27,22 @@ Welcome to the comprehensive user manual for Supertester. This document provides
     *   [`Supertester.ChaosHelpers`](#supertesterchaoshelpers)
 7.  [Performance Testing](#performance-testing)
     *   [`Supertester.PerformanceHelpers`](#supertesterperformancehelpers)
-8.  [Custom Assertions](#custom-assertions)
+8.  [Concurrency Harness](#concurrency-harness)
+    *   [`Supertester.ConcurrentHarness`](#supertesterconcurrentharness)
+    *   [`Supertester.PropertyHelpers`](#supertesterpropertyhelpers)
+    *   [`Supertester.MessageHarness`](#supertestermessageharness)
+9.  [Telemetry & Diagnostics](#telemetry--diagnostics)
+    *   [`Supertester.Telemetry`](#supertestertelemetry)
+10. [Custom Assertions](#custom-assertions)
     *   [`Supertester.Assertions`](#supertesterassertions)
-9.  [Practical Examples & Recipes](#practical-examples--recipes)
+11. [Practical Examples & Recipes](#practical-examples--recipes)
     *   [Basic GenServer Test](#basic-genserver-test)
     *   [Supervisor Restart Strategy Test](#supervisor-restart-strategy-test)
     *   [Chaos Test for System Resilience](#chaos-test-for-system-resilience)
     *   [Performance SLA Test](#performance-sla-test)
     *   [Memory Leak Detection](#memory-leak-detection)
-10. [Best Practices](#best-practices)
-11. [Troubleshooting](#troubleshooting)
+12. [Best Practices](#best-practices)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -430,6 +436,38 @@ Asserts that a system recovers from a chaos scenario within a given timeout.
     )
     ```
 
+**`run_chaos_suite(target, scenarios, opts \\ [])`**
+
+Executes a list of chaos scenarios—now including full `Supertester.ConcurrentHarness` scenarios—
+against the same target process or supervisor so you can orchestrate concurrent workloads while
+injecting faults.
+
+*   **Signature:** `@spec run_chaos_suite(pid(), [map()], keyword()) :: chaos_suite_report()`
+*   **Concurrent Scenarios:** Provide `%{type: :concurrent, build: fn target -> scenario end}` or
+    `%{type: :concurrent, scenario: <ConcurrentHarness scenario>}` entries to reuse the harness with
+    shared telemetry/reporting.
+*   **Example:**
+    ```elixir
+    scenarios = [
+      %{type: :kill_children, kill_rate: 0.4, duration_ms: 500},
+      %{
+        type: :concurrent,
+        build: fn supervisor ->
+          Supertester.ConcurrentHarness.simple_genserver_scenario(
+            MyWorker,
+            [{:cast, :do_work}, {:call, :get_state}],
+            3,
+            setup: fn -> {:ok, supervisor, %{}} end,
+            cleanup: fn _, _ -> :ok end
+          )
+        end
+      }
+    ]
+
+    report = run_chaos_suite(supervisor, scenarios, timeout: 10_000)
+    assert report.failed == 0
+    ```
+
 ---
 
 ## Performance Testing
@@ -490,6 +528,115 @@ Asserts that a GenServer's mailbox does not grow uncontrollably during an operat
       max_size: 50
     )
     ```
+
+---
+
+## Concurrency Harness
+
+### `Supertester.ConcurrentHarness`
+
+The concurrency harness lets you describe complex multi-threaded scenarios declaratively.
+Provide a `setup` function, thread scripts (lists of operations), optional mailbox monitoring,
+chaos hooks, performance expectations, and an invariant function. `run/1` coordinates each thread,
+synchronizes casts with `Supertester.TestableGenServer`, records every event, emits telemetry, and
+returns a diagnostic report:
+
+```elixir
+scenario =
+  Supertester.ConcurrentHarness.simple_genserver_scenario(
+    CounterServer,
+    [{:cast, :increment}, {:call, :value}],
+    4,
+    mailbox: [sampling_interval: 1],
+    chaos: Supertester.ConcurrentHarness.chaos_inject_crash(),
+    performance_expectations: [max_time_ms: 100],
+    invariant: fn server, ctx ->
+      {:ok, state} = Supertester.GenServerHelpers.get_server_state_safely(server)
+      assert state.count >= 0
+      assert ctx.metrics.total_operations > 0
+    end
+  )
+
+assert {:ok, report} = Supertester.ConcurrentHarness.run(scenario)
+```
+
+Use `from_property_config/3` to convert property-test generators straight into runnable scenarios.
+Scenario metadata automatically includes a `:scenario_id`, and every run emits
+`[:supertester, :concurrent, :scenario, :start|:stop]` telemetry events for observability.
+
+Additional helpers:
+
+* `chaos_kill_children/1` / `chaos_inject_crash/2` – build ready-made chaos hooks.
+* `run_with_performance/2` – wrap an ad-hoc scenario with performance bounds outside of the struct.
+
+### `Supertester.PropertyHelpers`
+
+`PropertyHelpers` builds on `StreamData` to emit normalized operations and scenario configs that the
+concurrent harness understands. `genserver_operation_sequence/2` normalizes operations into tagged
+`{:call, term}` / `{:cast, term}` tuples, while `concurrent_scenario/1` generates complete configs:
+
+```elixir
+use ExUnitProperties
+
+property "counter invariants hold" do
+  generator =
+    Supertester.PropertyHelpers.concurrent_scenario(
+      operations: [{:cast, :increment}, {:cast, :decrement}, {:call, :value}],
+      min_threads: 1,
+      max_threads: 3
+    )
+
+  check all cfg <- generator do
+    scenario = Supertester.ConcurrentHarness.from_property_config(CounterServer, cfg)
+    assert {:ok, _report} = Supertester.ConcurrentHarness.run(scenario)
+  end
+end
+```
+
+If `:stream_data` is not present in your project, these helpers raise a clear error suggesting the
+dependency addition.
+
+### `Supertester.MessageHarness`
+
+`MessageHarness.trace_messages/3` snapshots a process mailbox, enables `:erlang.trace` for
+`:receive` events, runs your function, then returns the captured messages and result. It is
+ideal for debugging concurrency issues without changing application code.
+
+```elixir
+report =
+  Supertester.MessageHarness.trace_messages(server, fn ->
+    send(server, {:direct, :hello})
+  end)
+
+assert {:direct, :hello} in report.messages
+```
+
+---
+
+## Telemetry & Diagnostics
+
+### `Supertester.Telemetry`
+
+Supertester emits `:telemetry` events under the `[:supertester | ...]` namespace. The helper
+module centralizes emission so you can subscribe once and observe:
+
+* `[:supertester, :concurrent, :scenario, :start|:stop]` – scenario lifecycle with duration/status.
+* `[:supertester, :concurrent, :mailbox, :sample]` – mailbox measurements collected during runs.
+* `[:supertester, :chaos, :start|:stop]` – chaos hooks firing, including duration and failures.
+* `[:supertester, :performance, :scenario, :measured]` – performance metrics captured for scenarios.
+
+Attach handlers with `:telemetry.attach/4` or `attach_many/4`:
+
+```elixir
+:telemetry.attach(
+  "supertester-console",
+  [:supertester, :concurrent, :scenario, :stop],
+  fn _event, %{duration_ms: duration}, metadata, _ ->
+    Logger.info("Scenario #{metadata.scenario_id} took #{duration}ms (#{metadata[:status] || :ok})")
+  end,
+  nil
+)
+```
 
 ---
 

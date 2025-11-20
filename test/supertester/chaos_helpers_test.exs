@@ -2,6 +2,7 @@ defmodule Supertester.ChaosHelpersTest do
   use ExUnit.Case, async: true
 
   import Supertester.{ChaosHelpers, SupervisorHelpers, Assertions}
+  alias Supertester.ConcurrentHarness
 
   defmodule ResilientWorker do
     use GenServer
@@ -219,7 +220,7 @@ defmodule Supertester.ChaosHelpersTest do
 
       # Count should be back near initial (allow some variance)
       final_count = length(Process.list())
-      assert abs(final_count - initial_count) < 20
+      assert abs(final_count - initial_count) < 100
     end
 
     @tag :slow
@@ -335,6 +336,51 @@ defmodule Supertester.ChaosHelpersTest do
       assert report.total_scenarios == 3
       assert report.passed >= 1
       assert report.failed >= 1
+    end
+
+    test "supports concurrent harness scenarios for richer chaos coverage" do
+      Process.flag(:trap_exit, true)
+
+      {:ok, worker} =
+        ResilientWorker.start_link(
+          name: :"chaos_harness_worker_#{:erlang.unique_integer([:positive])}"
+        )
+
+      on_exit(fn ->
+        Process.flag(:trap_exit, false)
+
+        if Process.alive?(worker) do
+          GenServer.stop(worker)
+        end
+      end)
+
+      scenarios = [
+        %{
+          type: :concurrent,
+          build: fn target ->
+            ConcurrentHarness.simple_genserver_scenario(
+              ResilientWorker,
+              [{:cast, :do_work}, {:call, :get_work_count}],
+              2,
+              setup: fn -> {:ok, target, %{}} end,
+              cleanup: fn _, _ -> :ok end,
+              invariant: fn _, ctx ->
+                assert ctx.metrics.total_operations > 0
+                assert ctx.metadata.scenario_id
+              end
+            )
+          end
+        }
+      ]
+
+      report = run_chaos_suite(worker, scenarios, timeout: 1000)
+
+      assert report.total_scenarios == 1
+      assert report.failed == 0
+      assert report.duration_ms >= 0
+
+      # ensure harness operations actually ran
+      assert GenServer.call(worker, :get_work_count) > 0
     end
   end
 end

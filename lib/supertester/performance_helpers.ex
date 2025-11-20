@@ -45,25 +45,33 @@ defmodule Supertester.PerformanceHelpers do
   """
   @spec assert_performance((-> any()), keyword()) :: :ok
   def assert_performance(operation, expectations) when is_function(operation, 0) do
-    result = measure_operation(operation)
+    operation
+    |> measure_operation()
+    |> assert_expectations(expectations)
+  end
 
+  @doc """
+  Asserts that the provided measurement map meets the expectations.
+  """
+  @spec assert_expectations(map(), keyword()) :: :ok
+  def assert_expectations(measurements, expectations) when is_map(measurements) do
     Enum.each(expectations, fn {metric, expected_value} ->
       case metric do
         :max_time_ms ->
-          actual_ms = result.time_us / 1000.0
+          actual_ms = measurements.time_us / 1000.0
 
           if actual_ms > expected_value do
             raise "Execution time #{Float.round(actual_ms, 2)}ms exceeded maximum of #{expected_value}ms"
           end
 
         :max_memory_bytes ->
-          if result.memory_bytes > expected_value do
-            raise "Memory usage #{result.memory_bytes} bytes exceeded maximum of #{expected_value} bytes"
+          if measurements.memory_bytes > expected_value do
+            raise "Memory usage #{measurements.memory_bytes} bytes exceeded maximum of #{expected_value} bytes"
           end
 
         :max_reductions ->
-          if result.reductions > expected_value do
-            raise "Reductions #{result.reductions} exceeded maximum of #{expected_value}"
+          if measurements.reductions > expected_value do
+            raise "Reductions #{measurements.reductions} exceeded maximum of #{expected_value}"
           end
 
         _ ->
@@ -166,6 +174,10 @@ defmodule Supertester.PerformanceHelpers do
   - `server` - The GenServer PID to monitor
   - `operation` - Function to execute while monitoring
 
+  ## Options
+
+  - `:sampling_interval` - Interval in ms between mailbox samples (default: 10)
+
   ## Returns
 
   Map with:
@@ -173,6 +185,7 @@ defmodule Supertester.PerformanceHelpers do
   - `:final_size` - Mailbox size after operation
   - `:max_size` - Maximum mailbox size observed
   - `:avg_size` - Average mailbox size
+  - `:result` - The result returned by the wrapped operation
 
   ## Examples
 
@@ -182,21 +195,22 @@ defmodule Supertester.PerformanceHelpers do
 
       assert report.max_size < 100
   """
-  @spec measure_mailbox_growth(pid(), (-> any())) :: map()
-  def measure_mailbox_growth(server, operation)
+  @spec measure_mailbox_growth(pid(), (-> any()), keyword()) :: map()
+  def measure_mailbox_growth(server, operation, opts \\ [])
       when is_pid(server) and is_function(operation, 0) do
     {:message_queue_len, initial_size} = Process.info(server, :message_queue_len)
+    sampling_interval = Keyword.get(opts, :sampling_interval, 10)
 
     # Start monitoring task
     parent = self()
 
     monitor_task =
       Task.async(fn ->
-        monitor_mailbox(server, parent, [initial_size])
+        monitor_mailbox(server, parent, [initial_size], sampling_interval)
       end)
 
     # Run operation
-    operation.()
+    result = operation.()
 
     # Stop monitoring
     send(monitor_task.pid, :stop)
@@ -218,7 +232,8 @@ defmodule Supertester.PerformanceHelpers do
       initial_size: initial_size,
       final_size: final_size,
       max_size: max_size,
-      avg_size: avg_size
+      avg_size: avg_size,
+      result: result
     }
   end
 
@@ -229,6 +244,7 @@ defmodule Supertester.PerformanceHelpers do
 
   - `:during` - Function to execute while monitoring (required)
   - `:max_size` - Maximum mailbox size allowed (default: 100)
+  - Additional options forwarded to `measure_mailbox_growth/3`
 
   ## Examples
 
@@ -243,8 +259,9 @@ defmodule Supertester.PerformanceHelpers do
   def assert_mailbox_stable(server, opts) when is_pid(server) do
     operation = Keyword.fetch!(opts, :during)
     max_size = Keyword.get(opts, :max_size, 100)
+    monitor_opts = Keyword.drop(opts, [:during, :max_size])
 
-    report = measure_mailbox_growth(server, operation)
+    report = measure_mailbox_growth(server, operation, monitor_opts)
 
     if report.max_size > max_size do
       raise """
@@ -327,15 +344,15 @@ defmodule Supertester.PerformanceHelpers do
     end
   end
 
-  defp monitor_mailbox(server, parent, samples) do
+  defp monitor_mailbox(server, parent, samples, interval) do
     receive do
       :stop ->
         send(parent, {:samples, samples})
         samples
     after
-      10 ->
+      interval ->
         {:message_queue_len, size} = Process.info(server, :message_queue_len)
-        monitor_mailbox(server, parent, [size | samples])
+        monitor_mailbox(server, parent, [size | samples], interval)
     end
   end
 end

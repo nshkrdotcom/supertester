@@ -12,10 +12,12 @@ defmodule Supertester do
   - `Supertester.OTPHelpers` - OTP-compliant testing utilities
   - `Supertester.GenServerHelpers` - GenServer-specific test patterns
   - `Supertester.SupervisorHelpers` - Supervision tree testing utilities
-  - `Supertester.MessageHelpers` - Message tracing and ETS management
+  - `Supertester.ConcurrentHarness` - Scenario-based concurrency orchestrator
+  - `Supertester.PropertyHelpers` - StreamData generators for concurrency testing
+  - `Supertester.MessageHarness` - Mailbox tracing utilities
+  - `Supertester.Telemetry` - Centralized telemetry emission helpers
   - `Supertester.PerformanceHelpers` - Benchmarking and load testing
   - `Supertester.ChaosHelpers` - Chaos engineering and resilience testing
-  - `Supertester.DataGenerators` - Test data and scenario generation
   - `Supertester.Assertions` - Custom OTP-aware assertions
 
   ## Usage

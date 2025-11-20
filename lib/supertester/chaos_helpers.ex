@@ -31,6 +31,7 @@ defmodule Supertester.ChaosHelpers do
   """
 
   require Logger
+  alias Supertester.ConcurrentHarness
 
   @type crash_spec ::
           :immediate
@@ -489,6 +490,9 @@ defmodule Supertester.ChaosHelpers do
           chaos_kill_children(target, Map.to_list(Map.delete(scenario, :type)))
           {:ok, scenario}
 
+        :concurrent ->
+          run_concurrent_scenario(target, scenario)
+
         _unknown ->
           {:error, {scenario, :unknown_scenario_type}}
       end
@@ -500,4 +504,27 @@ defmodule Supertester.ChaosHelpers do
         {:error, {scenario, reason}}
     end
   end
+
+  defp run_concurrent_scenario(target, scenario) do
+    with {:ok, harness_input} <- build_harness_input(target, scenario),
+         {:ok, report} <- ConcurrentHarness.run(harness_input) do
+      {:ok, Map.put(scenario, :report, report)}
+    else
+      {:error, reason} -> {:error, {scenario, reason}}
+    end
+  end
+
+  defp build_harness_input(_target, %{scenario: %ConcurrentHarness.Scenario{} = spec}),
+    do: {:ok, spec}
+
+  defp build_harness_input(_target, %{scenario: spec}) when is_map(spec) or is_list(spec),
+    do: {:ok, spec}
+
+  defp build_harness_input(target, %{build: fun}) when is_function(fun, 1) do
+    {:ok, fun.(target)}
+  rescue
+    error -> {:error, {:scenario_builder_failed, error}}
+  end
+
+  defp build_harness_input(_target, _scenario), do: {:error, :missing_concurrent_scenario}
 end

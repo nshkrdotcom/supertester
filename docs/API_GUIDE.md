@@ -125,6 +125,163 @@ end
 
 ---
 
+## Supertester.ConcurrentHarness
+
+High-level scenario harness for orchestrating concurrent threads against a target process.
+
+### run/1
+
+```elixir
+@spec run(Supertester.ConcurrentHarness.scenario()) ::
+        {:ok, %{events: [map()], metrics: map(), mailbox: map() | nil}} | {:error, term()}
+```
+
+Runs a scenario built via `simple_genserver_scenario/4`, `from_property_config/3`, or a manual map.
+
+- `:threads` – List of thread scripts (`[operation()]`)
+- `:timeout_ms` – Overall timeout (default: 5_000)
+- `:mailbox` – Keyword list forwarded to `PerformanceHelpers.measure_mailbox_growth/3`
+- `:invariant` – `fn pid, ctx -> ... end` run after threads complete
+- `:chaos` – Optional `(pid, ctx) -> any` hook executed concurrently (see helpers below)
+- `:performance_expectations` – Keyword list of bounds enforced automatically
+
+Every run emits telemetry events under `[:supertester, :concurrent, :scenario, :start|:stop]`
+along with optional mailbox/performance/chaos events. Reports include `:chaos`, `:performance`,
+and the auto-generated `:scenario_id` metadata for downstream correlation.
+
+### simple_genserver_scenario/4
+
+```elixir
+@spec simple_genserver_scenario(module(), [term()], pos_integer(), keyword()) ::
+        Supertester.ConcurrentHarness.Scenario.t()
+```
+
+Bootstraps a scenario for a GenServer module. Accepts options such as:
+
+- `:server_opts` – Passed to `start_link/1`
+- `:default_operation` – Tag bare terms as `:call` or `:cast`
+- `:invariant` – Function to run after threads finish
+- `:mailbox` – Monitoring configuration
+- `:chaos` – Chaos hook (e.g., `chaos_inject_crash/2`)
+- `:performance_expectations` – Keyword list for automatic performance enforcement
+
+### from_property_config/3
+
+```elixir
+@spec from_property_config(module(), map(), keyword()) ::
+        Supertester.ConcurrentHarness.Scenario.t()
+```
+
+Converts a map (often emitted by `PropertyHelpers.concurrent_scenario/1`) into a runnable scenario.
+
+### run_with_performance/2
+
+```elixir
+@spec run_with_performance(scenario(), keyword()) ::
+        {:ok, map()} | {:error, term()}
+```
+
+Convenience helper that measures `run/1`, enforces expectations, and returns the scenario result.
+Avoids wrapping every test manually with `assert_performance/2`.
+
+### chaos_kill_children/1 and chaos_inject_crash/2
+
+```elixir
+@spec chaos_kill_children(keyword()) :: chaos_fun()
+@spec chaos_inject_crash(ChaosHelpers.crash_spec(), keyword()) :: chaos_fun()
+```
+
+Generate ready-to-use chaos hooks sourced from `Supertester.ChaosHelpers`. Use them in the `:chaos`
+option when building scenarios:
+
+```elixir
+scenario = Supertester.ConcurrentHarness.simple_genserver_scenario(
+  MySupervisor,
+  [:status],
+  3,
+  chaos: Supertester.ConcurrentHarness.chaos_kill_children(kill_rate: 0.2)
+)
+```
+
+---
+
+## Supertester.PropertyHelpers
+
+StreamData helpers for generating concurrency scenarios.
+
+### genserver_operation_sequence/2
+
+```elixir
+@spec genserver_operation_sequence([term()], keyword()) ::
+        StreamData.t([Supertester.ConcurrentHarness.operation()])
+```
+
+Generates lists of normalized operations (`{:call, term}`, `{:cast, term}`, or `{:custom, fun}`).
+Options include `:default_operation`, `:min_length`, and `:max_length`.
+
+### concurrent_scenario/1
+
+```elixir
+@spec concurrent_scenario(keyword()) :: StreamData.t(map())
+```
+
+Produces property-test-friendly configs with `:thread_scripts`, `:timeout_ms`, and metadata.
+Feed the output to `ConcurrentHarness.from_property_config/3`.
+
+---
+
+## Supertester.MessageHarness
+
+Mailbox visibility utilities.
+
+### trace_messages/3
+
+```elixir
+@spec trace_messages(pid(), (() -> any()), keyword()) :: %{
+        messages: [term()],
+        initial_mailbox: [term()],
+        final_mailbox: [term()],
+        result: term()
+      }
+```
+
+Enables `:erlang.trace/3` for `:receive` events while running the provided function, capturing the
+messages delivered to the target process and snapshotting its mailbox before/after execution.
+
+---
+
+## Supertester.Telemetry
+
+Single entry point for emitting telemetry events with the `[:supertester | event]` prefix.
+
+### scenario_start/1 and scenario_stop/2
+
+```elixir
+Telemetry.scenario_start(%{scenario_id: 123})
+Telemetry.scenario_stop(%{duration_ms: 42}, %{scenario_id: 123, status: :ok})
+```
+
+Used internally by the concurrent harness but available if you extend the library.
+
+### mailbox_sample/2, chaos_event/3, performance_event/2
+
+Emit mailbox metrics, chaos lifecycle updates, and performance measurements respectively.
+All helpers ultimately call `emit/3`, so you can attach via `:telemetry.attach/4` or
+`attach_many/4`:
+
+```elixir
+:telemetry.attach(
+  "supertester-log",
+  [:supertester, :performance, :scenario, :measured],
+  fn _event, measurements, metadata, _ ->
+    Logger.debug("Scenario #{metadata.scenario_id} took #{measurements.time_us / 1000}ms")
+  end,
+  nil
+)
+```
+
+---
+
 ## OTP Testing
 
 ### Supertester.OTPHelpers
@@ -505,17 +662,31 @@ Runs comprehensive chaos scenario testing.
 ```
 
 **Example**:
+Supports both legacy scenario maps and concurrent harness scenarios:
+
 ```elixir
 scenarios = [
   %{type: :kill_children, kill_rate: 0.3, duration_ms: 1000},
-  %{type: :kill_children, kill_rate: 0.5, duration_ms: 2000},
+  %{
+    type: :concurrent,
+    build: fn supervisor ->
+      Supertester.ConcurrentHarness.simple_genserver_scenario(
+        MyWorker,
+        [{:cast, :do_work}, {:call, :get_state}],
+        3,
+        setup: fn -> {:ok, supervisor, %{}} end,
+        cleanup: fn _, _ -> :ok end
+      )
+    end
+  }
 ]
 
 report = run_chaos_suite(supervisor, scenarios, timeout: 30_000)
-
-assert report.passed == 2
-assert report.failed == 0
 ```
+
+For concurrent scenarios you may also pass `scenario: <ConcurrentHarness scenario/map>` directly
+if no special build logic is required. Each harness run shares the same telemetry/reporting
+infrastructure as `Supertester.ConcurrentHarness`.
 
 ---
 
@@ -548,6 +719,23 @@ test "API meets performance SLA" do
     max_reductions: 100_000
   )
 end
+
+#### assert_expectations/2
+
+Validates a measurement map (typically returned by `measure_operation/1`) against the same
+expectations supported by `assert_performance/2`.
+
+```elixir
+@spec assert_expectations(map(), keyword()) :: :ok
+```
+
+Useful when you need the measured result but still want to enforce limits:
+
+```elixir
+measurement = measure_operation(fn -> run_workload() end)
+assert_expectations(measurement, max_time_ms: 50)
+assert measurement.result == :ok
+```
 ```
 
 #### assert_no_memory_leak/2
@@ -597,25 +785,29 @@ IO.puts "Memory: #{metrics.memory_bytes} bytes"
 IO.puts "Reductions: #{metrics.reductions}"
 ```
 
-#### measure_mailbox_growth/2
+#### measure_mailbox_growth/3
 
 Monitors mailbox size during operation.
 
 ```elixir
-@spec measure_mailbox_growth(pid(), (() -> any())) :: map()
+@spec measure_mailbox_growth(pid(), (() -> any()), keyword()) :: map()
 ```
+
+**Options**:
+- `:sampling_interval` - Interval in ms between samples (default: 10)
 
 **Returns**:
 - `:initial_size` - Mailbox size before
 - `:final_size` - Mailbox size after
 - `:max_size` - Maximum observed
 - `:avg_size` - Average size
+- `:result` - Return value from the wrapped operation
 
 **Example**:
 ```elixir
 report = measure_mailbox_growth(server, fn ->
   send_many_messages(server, 1000)
-end)
+end, sampling_interval: 5)
 
 assert report.max_size < 100
 ```
@@ -631,6 +823,7 @@ Asserts mailbox doesn't grow unbounded.
 **Options**:
 - `:during` - Function to execute (required)
 - `:max_size` - Maximum mailbox size (default: 100)
+- Additional options forwarded to `measure_mailbox_growth/3`
 
 **Example**:
 ```elixir
