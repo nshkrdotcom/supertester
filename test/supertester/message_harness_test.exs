@@ -13,6 +13,10 @@ defmodule Supertester.MessageHarnessTest do
         {:stop, caller} ->
           send(caller, :stopped)
 
+        {:ack, caller} ->
+          send(caller, :ack)
+          loop()
+
         _ ->
           loop()
       end
@@ -25,8 +29,10 @@ defmodule Supertester.MessageHarnessTest do
     report =
       MessageHarness.trace_messages(pid, fn ->
         send(pid, {:direct, :hello})
-        Process.sleep(5)
-        :ok
+        # Synchronize: send ack request and wait for response
+        # This proves Target received our earlier message (FIFO ordering)
+        send(pid, {:ack, self()})
+        receive do: (:ack -> :ok)
       end)
 
     assert {:direct, :hello} in report.messages

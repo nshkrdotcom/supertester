@@ -68,8 +68,8 @@ defmodule Supertester.SupervisorHelpersTest do
       [first_worker_pid | other_pids] = initial_pids
       Process.exit(first_worker_pid, :kill)
 
-      # Wait for supervisor to restart
-      :timer.sleep(50)
+      # Wait for supervisor to stabilize using proper OTP synchronization
+      :ok = wait_for_supervisor_stabilization(supervisor)
 
       # Get new children
       new_children = Supervisor.which_children(supervisor)
@@ -93,8 +93,8 @@ defmodule Supertester.SupervisorHelpersTest do
       first_pid = hd(initial_pids)
       Process.exit(first_pid, :kill)
 
-      # Wait for supervisor to restart all
-      :timer.sleep(50)
+      # Wait for supervisor to stabilize using proper OTP synchronization
+      :ok = wait_for_supervisor_stabilization(supervisor)
 
       # Get new PIDs
       new_children = Supervisor.which_children(supervisor)
@@ -114,7 +114,9 @@ defmodule Supertester.SupervisorHelpersTest do
       # Start more children by restarting
       [{_id, pid, _type, _mods} | _] = Supervisor.which_children(supervisor)
       Process.exit(pid, :kill)
-      :timer.sleep(50)
+
+      # Wait for supervisor to stabilize using proper OTP synchronization
+      :ok = wait_for_supervisor_stabilization(supervisor)
 
       # Stop tracing
       events = stop_trace.()
@@ -133,8 +135,8 @@ defmodule Supertester.SupervisorHelpersTest do
       [{_id, pid, _type, _mods}] = Supervisor.which_children(supervisor)
       Process.exit(pid, :kill)
 
-      # Wait for restart
-      :timer.sleep(50)
+      # Wait for supervisor to stabilize using proper OTP synchronization
+      :ok = wait_for_supervisor_stabilization(supervisor)
 
       events = stop_trace.()
 

@@ -30,7 +30,7 @@ defmodule Supertester.OTPHelpersTest do
       children = [
         %{
           id: __MODULE__.Worker,
-          start: {Task, :start_link, [fn -> Process.sleep(:infinity) end]}
+          start: {Task, :start_link, [fn -> receive do: (:never -> :ok) end]}
         }
       ]
 

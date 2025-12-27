@@ -46,16 +46,14 @@ defmodule Supertester.GenServerHelpers do
   """
   @spec get_server_state_safely(GenServer.server()) :: {:ok, term()} | {:error, term()}
   def get_server_state_safely(server) do
-    try do
-      # Try to get state via :sys.get_state/1 which works for most GenServers
-      state = :sys.get_state(server)
-      {:ok, state}
-    catch
-      :exit, {:noproc, _} -> {:error, :noproc}
-      :exit, {:timeout, _} -> {:error, :timeout}
-      :exit, reason -> {:error, reason}
-      error -> {:error, error}
-    end
+    # Try to get state via :sys.get_state/1 which works for most GenServers
+    state = :sys.get_state(server)
+    {:ok, state}
+  catch
+    :exit, {:noproc, _} -> {:error, :noproc}
+    :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, reason -> {:error, reason}
+    error -> {:error, error}
   end
 
   @doc """
@@ -78,14 +76,12 @@ defmodule Supertester.GenServerHelpers do
   @spec call_with_timeout(GenServer.server(), term(), timeout()) ::
           {:ok, term()} | {:error, term()}
   def call_with_timeout(server, message, timeout \\ 1000) do
-    try do
-      response = GenServer.call(server, message, timeout)
-      {:ok, response}
-    catch
-      :exit, {:noproc, _} -> {:error, :noproc}
-      :exit, {:timeout, _} -> {:error, :timeout}
-      :exit, reason -> {:error, reason}
-    end
+    response = GenServer.call(server, message, timeout)
+    {:ok, response}
+  catch
+    :exit, {:noproc, _} -> {:error, :noproc}
+    :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, reason -> {:error, reason}
   end
 
   @doc """
@@ -288,56 +284,59 @@ defmodule Supertester.GenServerHelpers do
   """
   @spec test_server_crash_recovery(GenServer.server(), term()) :: {:ok, map()} | {:error, term()}
   def test_server_crash_recovery(server, crash_reason) do
-    # Get original PID
-    original_pid =
-      case server do
-        pid when is_pid(pid) -> pid
-        name when is_atom(name) -> Process.whereis(name)
-      end
+    original_pid = resolve_server_pid(server)
 
     if original_pid == nil do
       {:error, :server_not_found}
     else
-      # Monitor the original process
-      ref = Process.monitor(original_pid)
+      do_crash_recovery_test(server, original_pid, crash_reason)
+    end
+  end
 
-      # Crash the server
-      Process.exit(original_pid, crash_reason)
+  defp resolve_server_pid(pid) when is_pid(pid), do: pid
+  defp resolve_server_pid(name) when is_atom(name), do: Process.whereis(name)
 
-      # Wait for crash
-      crash_confirmed =
-        receive do
-          {:DOWN, ^ref, :process, ^original_pid, ^crash_reason} -> true
-          {:DOWN, ^ref, :process, ^original_pid, _other_reason} -> true
-        after
-          1000 -> false
-        end
+  defp do_crash_recovery_test(server, original_pid, crash_reason) do
+    ref = Process.monitor(original_pid)
+    Process.exit(original_pid, crash_reason)
 
-      if crash_confirmed do
-        # Wait for potential restart (if supervised)
-        case wait_for_recovery(server, original_pid, 5000) do
-          {:ok, new_pid} ->
-            {:ok,
-             %{
-               recovered: true,
-               original_pid: original_pid,
-               new_pid: new_pid,
-               crash_reason: crash_reason
-             }}
+    crash_confirmed = await_crash_confirmation(ref, original_pid, crash_reason)
 
-          {:error, reason} ->
-            {:ok,
-             %{
-               recovered: false,
-               original_pid: original_pid,
-               new_pid: nil,
-               crash_reason: crash_reason,
-               recovery_error: reason
-             }}
-        end
-      else
-        {:error, :crash_failed}
-      end
+    if crash_confirmed do
+      build_recovery_result(server, original_pid, crash_reason)
+    else
+      {:error, :crash_failed}
+    end
+  end
+
+  defp await_crash_confirmation(ref, original_pid, _crash_reason) do
+    receive do
+      {:DOWN, ^ref, :process, ^original_pid, _reason} -> true
+    after
+      1000 -> false
+    end
+  end
+
+  defp build_recovery_result(server, original_pid, crash_reason) do
+    case wait_for_recovery(server, original_pid, 5000) do
+      {:ok, new_pid} ->
+        {:ok,
+         %{
+           recovered: true,
+           original_pid: original_pid,
+           new_pid: new_pid,
+           crash_reason: crash_reason
+         }}
+
+      {:error, reason} ->
+        {:ok,
+         %{
+           recovered: false,
+           original_pid: original_pid,
+           new_pid: nil,
+           crash_reason: crash_reason,
+           recovery_error: reason
+         }}
     end
   end
 
@@ -383,23 +382,25 @@ defmodule Supertester.GenServerHelpers do
       operation = Enum.random(operations)
 
       {new_calls, new_casts, new_errors} =
-        case operation do
-          {:call, message} ->
-            case call_with_timeout(server, message, 100) do
-              {:ok, _} -> {calls + 1, casts, errors}
-              {:error, _} -> {calls, casts, errors + 1}
-            end
-
-          {:cast, message} ->
-            # GenServer.cast always returns :ok
-            GenServer.cast(server, message)
-            {calls, casts + 1, errors}
-        end
+        execute_stress_operation(server, operation, calls, casts, errors)
 
       stress_worker(server, operations, end_time, new_calls, new_casts, new_errors)
     else
       %{calls: calls, casts: casts, errors: errors}
     end
+  end
+
+  defp execute_stress_operation(server, {:call, message}, calls, casts, errors) do
+    case call_with_timeout(server, message, 100) do
+      {:ok, _} -> {calls + 1, casts, errors}
+      {:error, _} -> {calls, casts, errors + 1}
+    end
+  end
+
+  defp execute_stress_operation(server, {:cast, message}, calls, casts, errors) do
+    # GenServer.cast always returns :ok
+    GenServer.cast(server, message)
+    {calls, casts + 1, errors}
   end
 
   defp wait_for_recovery(server, original_pid, timeout) do
@@ -414,48 +415,37 @@ defmodule Supertester.GenServerHelpers do
     if remaining <= 0 do
       {:error, :recovery_timeout}
     else
-      current_pid =
-        case server do
-          pid when is_pid(pid) -> pid
-          name when is_atom(name) -> Process.whereis(name)
-        end
-
-      cond do
-        current_pid == nil ->
-          # Process not yet restarted, wait using receive timeout
-          receive do
-          after
-            min(10, remaining) -> :ok
-          end
-
-          wait_for_recovery_loop(server, original_pid, start_time, timeout)
-
-        current_pid == original_pid ->
-          # Still the old PID, wait for restart
-          receive do
-          after
-            min(10, remaining) -> :ok
-          end
-
-          wait_for_recovery_loop(server, original_pid, start_time, timeout)
-
-        current_pid != original_pid ->
-          # New process found, verify it's responsive
-          case call_with_timeout(current_pid, :__supertester_sync__, 100) do
-            {:ok, _} ->
-              {:ok, current_pid}
-
-            {:error, _} ->
-              # Not responsive yet, wait a bit
-              receive do
-              after
-                min(10, remaining) -> :ok
-              end
-
-              wait_for_recovery_loop(server, original_pid, start_time, timeout)
-          end
-      end
+      current_pid = resolve_server_pid(server)
+      check_recovery_status(server, original_pid, current_pid, remaining, start_time, timeout)
     end
+  end
+
+  defp check_recovery_status(server, original_pid, nil, remaining, start_time, timeout) do
+    wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout)
+  end
+
+  defp check_recovery_status(server, original_pid, current_pid, remaining, start_time, timeout)
+       when current_pid == original_pid do
+    wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout)
+  end
+
+  defp check_recovery_status(server, original_pid, current_pid, remaining, start_time, timeout) do
+    case call_with_timeout(current_pid, :__supertester_sync__, 100) do
+      {:ok, _} ->
+        {:ok, current_pid}
+
+      {:error, _} ->
+        wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout)
+    end
+  end
+
+  defp wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout) do
+    receive do
+    after
+      min(10, remaining) -> :ok
+    end
+
+    wait_for_recovery_loop(server, original_pid, start_time, timeout)
   end
 
   defp handle_missing_sync(true, server, sync_message) do

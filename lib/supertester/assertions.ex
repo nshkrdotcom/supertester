@@ -103,24 +103,27 @@ defmodule Supertester.Assertions do
   def assert_genserver_state(server, expected_state) do
     case Supertester.GenServerHelpers.get_server_state_safely(server) do
       {:ok, actual_state} ->
-        case expected_state do
-          fun when is_function(fun, 1) ->
-            if fun.(actual_state) do
-              :ok
-            else
-              raise "GenServer state #{inspect(actual_state)} did not pass validation function"
-            end
-
-          expected when is_map(expected) or is_list(expected) ->
-            if actual_state == expected do
-              :ok
-            else
-              raise "Expected GenServer state to be #{inspect(expected)}, got #{inspect(actual_state)}"
-            end
-        end
+        validate_genserver_state(actual_state, expected_state)
 
       {:error, reason} ->
         raise "Failed to get GenServer state: #{inspect(reason)}"
+    end
+  end
+
+  defp validate_genserver_state(actual_state, fun) when is_function(fun, 1) do
+    if fun.(actual_state) do
+      :ok
+    else
+      raise "GenServer state #{inspect(actual_state)} did not pass validation function"
+    end
+  end
+
+  defp validate_genserver_state(actual_state, expected)
+       when is_map(expected) or is_list(expected) do
+    if actual_state == expected do
+      :ok
+    else
+      raise "Expected GenServer state to be #{inspect(expected)}, got #{inspect(actual_state)}"
     end
   end
 
@@ -188,18 +191,16 @@ defmodule Supertester.Assertions do
   """
   @spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
   def assert_supervisor_strategy(supervisor, _expected_strategy) do
-    try do
-      _children = Supervisor.which_children(supervisor)
-      _count = Supervisor.count_children(supervisor)
+    _children = Supervisor.which_children(supervisor)
+    _count = Supervisor.count_children(supervisor)
 
-      # This is a simplified check - in practice, strategy detection
-      # would require more sophisticated analysis
-      # For now, we just verify the supervisor is accessible
-      :ok
-    catch
-      :exit, reason ->
-        raise "Failed to check supervisor strategy: #{inspect(reason)}"
-    end
+    # This is a simplified check - in practice, strategy detection
+    # would require more sophisticated analysis
+    # For now, we just verify the supervisor is accessible
+    :ok
+  catch
+    :exit, reason ->
+      raise "Failed to check supervisor strategy: #{inspect(reason)}"
   end
 
   @doc """
@@ -216,18 +217,16 @@ defmodule Supertester.Assertions do
   """
   @spec assert_child_count(Supervisor.supervisor(), non_neg_integer()) :: :ok
   def assert_child_count(supervisor, expected_count) when is_integer(expected_count) do
-    try do
-      %{active: active} = Supervisor.count_children(supervisor)
+    %{active: active} = Supervisor.count_children(supervisor)
 
-      if active == expected_count do
-        :ok
-      else
-        raise "Expected supervisor to have #{expected_count} children, got #{active}"
-      end
-    catch
-      :exit, reason ->
-        raise "Failed to count supervisor children: #{inspect(reason)}"
+    if active == expected_count do
+      :ok
+    else
+      raise "Expected supervisor to have #{expected_count} children, got #{active}"
     end
+  catch
+    :exit, reason ->
+      raise "Failed to count supervisor children: #{inspect(reason)}"
   end
 
   @doc """
@@ -243,25 +242,23 @@ defmodule Supertester.Assertions do
   """
   @spec assert_all_children_alive(Supervisor.supervisor()) :: :ok
   def assert_all_children_alive(supervisor) do
-    try do
-      children = Supervisor.which_children(supervisor)
+    children = Supervisor.which_children(supervisor)
 
-      dead_children =
-        Enum.filter(children, fn
-          {_id, :undefined, _type, _modules} -> true
-          {_id, pid, _type, _modules} when is_pid(pid) -> not Process.alive?(pid)
-          _ -> false
-        end)
+    dead_children =
+      Enum.filter(children, fn
+        {_id, :undefined, _type, _modules} -> true
+        {_id, pid, _type, _modules} when is_pid(pid) -> not Process.alive?(pid)
+        _ -> false
+      end)
 
-      if Enum.empty?(dead_children) do
-        :ok
-      else
-        raise "Expected all supervisor children to be alive, but found dead children: #{inspect(dead_children)}"
-      end
-    catch
-      :exit, reason ->
-        raise "Failed to check supervisor children: #{inspect(reason)}"
+    if Enum.empty?(dead_children) do
+      :ok
+    else
+      raise "Expected all supervisor children to be alive, but found dead children: #{inspect(dead_children)}"
     end
+  catch
+    :exit, reason ->
+      raise "Failed to check supervisor children: #{inspect(reason)}"
   end
 
   @doc """

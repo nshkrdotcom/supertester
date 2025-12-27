@@ -55,32 +55,31 @@ defmodule Supertester.PerformanceHelpers do
   """
   @spec assert_expectations(map(), keyword()) :: :ok
   def assert_expectations(measurements, expectations) when is_map(measurements) do
-    Enum.each(expectations, fn {metric, expected_value} ->
-      case metric do
-        :max_time_ms ->
-          actual_ms = measurements.time_us / 1000.0
-
-          if actual_ms > expected_value do
-            raise "Execution time #{Float.round(actual_ms, 2)}ms exceeded maximum of #{expected_value}ms"
-          end
-
-        :max_memory_bytes ->
-          if measurements.memory_bytes > expected_value do
-            raise "Memory usage #{measurements.memory_bytes} bytes exceeded maximum of #{expected_value} bytes"
-          end
-
-        :max_reductions ->
-          if measurements.reductions > expected_value do
-            raise "Reductions #{measurements.reductions} exceeded maximum of #{expected_value}"
-          end
-
-        _ ->
-          :ok
-      end
-    end)
-
+    Enum.each(expectations, &assert_expectation(measurements, &1))
     :ok
   end
+
+  defp assert_expectation(measurements, {:max_time_ms, expected_value}) do
+    actual_ms = measurements.time_us / 1000.0
+
+    if actual_ms > expected_value do
+      raise "Execution time #{Float.round(actual_ms, 2)}ms exceeded maximum of #{expected_value}ms"
+    end
+  end
+
+  defp assert_expectation(measurements, {:max_memory_bytes, expected_value}) do
+    if measurements.memory_bytes > expected_value do
+      raise "Memory usage #{measurements.memory_bytes} bytes exceeded maximum of #{expected_value} bytes"
+    end
+  end
+
+  defp assert_expectation(measurements, {:max_reductions, expected_value}) do
+    if measurements.reductions > expected_value do
+      raise "Reductions #{measurements.reductions} exceeded maximum of #{expected_value}"
+    end
+  end
+
+  defp assert_expectation(_measurements, _other), do: :ok
 
   @doc """
   Verifies operation doesn't leak memory over many iterations.

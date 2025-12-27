@@ -1,7 +1,7 @@
 defmodule Supertester.MixProject do
   use Mix.Project
 
-  @version "0.3.1"
+  @version "0.4.0"
   @source_url "https://github.com/nshkrdotcom/supertester"
 
   def project do
@@ -22,6 +22,9 @@ defmodule Supertester.MixProject do
         "test.all": :test,
         "test.integration": :test,
         "test.unit": :test
+      ],
+      dialyzer: [
+        plt_add_apps: [:ex_unit]
       ]
     ]
   end
@@ -34,7 +37,7 @@ defmodule Supertester.MixProject do
 
   defp deps do
     [
-      {:stream_data, "~> 1.0", optional: true},
+      {:stream_data, "~> 1.0"},
       {:telemetry, "~> 1.0"},
       {:benchee, "~> 1.3", only: :test, runtime: false},
       {:ex_doc, "~> 0.27", only: :dev, runtime: false},

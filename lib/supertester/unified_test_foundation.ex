@@ -280,11 +280,9 @@ defmodule Supertester.UnifiedTestFoundation do
   end
 
   defp delete_ets_table_safely(table) do
-    try do
-      :ets.delete(table)
-    rescue
-      ArgumentError -> :ok
-    end
+    :ets.delete(table)
+  rescue
+    ArgumentError -> :ok
   end
 
   defp check_contamination(nil), do: :ok

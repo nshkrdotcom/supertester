@@ -128,15 +128,13 @@ defmodule Supertester.OTPHelpers do
   """
   @spec wait_for_genserver_sync(GenServer.server(), timeout()) :: :ok | {:error, term()}
   def wait_for_genserver_sync(server, timeout \\ 1000) do
-    try do
-      # Use a synchronous call to ensure the server is responsive
-      GenServer.call(server, :__supertester_sync__, timeout)
-      :ok
-    catch
-      :exit, {:noproc, _} -> {:error, :noproc}
-      :exit, {:timeout, _} -> {:error, :timeout}
-      :exit, reason -> {:error, reason}
-    end
+    # Use a synchronous call to ensure the server is responsive
+    GenServer.call(server, :__supertester_sync__, timeout)
+    :ok
+  catch
+    :exit, {:noproc, _} -> {:error, :noproc}
+    :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, reason -> {:error, reason}
   end
 
   @doc """
@@ -425,41 +423,51 @@ defmodule Supertester.OTPHelpers do
     if remaining <= 0 do
       {:error, :timeout}
     else
-      case Process.whereis(process_name) do
-        nil ->
-          # Process not yet registered, wait with receive timeout
-          receive do
-          after
-            min(5, remaining) -> :ok
-          end
+      current_pid = Process.whereis(process_name)
 
-          wait_for_restart_loop(process_name, original_pid, start_time, timeout)
-
-        ^original_pid ->
-          # Still the old PID, wait for it to change
-          receive do
-          after
-            min(5, remaining) -> :ok
-          end
-
-          wait_for_restart_loop(process_name, original_pid, start_time, timeout)
-
-        new_pid when is_pid(new_pid) ->
-          # New process found, verify it's responsive
-          case wait_for_genserver_sync(new_pid, 100) do
-            :ok ->
-              {:ok, new_pid}
-
-            {:error, _} ->
-              # Not responsive yet, wait a bit
-              receive do
-              after
-                min(5, remaining) -> :ok
-              end
-
-              wait_for_restart_loop(process_name, original_pid, start_time, timeout)
-          end
-      end
+      check_restart_status(
+        process_name,
+        original_pid,
+        current_pid,
+        remaining,
+        start_time,
+        timeout
+      )
     end
+  end
+
+  defp check_restart_status(process_name, original_pid, nil, remaining, start_time, timeout) do
+    wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout)
+  end
+
+  defp check_restart_status(
+         process_name,
+         original_pid,
+         current_pid,
+         remaining,
+         start_time,
+         timeout
+       )
+       when current_pid == original_pid do
+    wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout)
+  end
+
+  defp check_restart_status(process_name, original_pid, new_pid, remaining, start_time, timeout) do
+    case wait_for_genserver_sync(new_pid, 100) do
+      :ok ->
+        {:ok, new_pid}
+
+      {:error, _} ->
+        wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout)
+    end
+  end
+
+  defp wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout) do
+    receive do
+    after
+      min(5, remaining) -> :ok
+    end
+
+    wait_for_restart_loop(process_name, original_pid, start_time, timeout)
   end
 end

@@ -55,19 +55,7 @@ defmodule Supertester.TestableGenServer do
   defmacro __before_compile__(_env) do
     quote do
       # Only define if not already defined by user
-      unless Module.defines?(__MODULE__, {:handle_call, 3}) do
-        def handle_call(:__supertester_sync__, _from, state) do
-          {:reply, :ok, state}
-        end
-
-        def handle_call({:__supertester_sync__, opts}, _from, state) do
-          if Keyword.get(opts, :return_state, false) do
-            {:reply, {:ok, state}, state}
-          else
-            {:reply, :ok, state}
-          end
-        end
-      else
+      if Module.defines?(__MODULE__, {:handle_call, 3}) do
         # User has handle_call, prepend our clauses
         defoverridable handle_call: 3
 
@@ -86,6 +74,18 @@ defmodule Supertester.TestableGenServer do
         # Delegate to original handle_call for other messages
         def handle_call(msg, from, state) do
           super(msg, from, state)
+        end
+      else
+        def handle_call(:__supertester_sync__, _from, state) do
+          {:reply, :ok, state}
+        end
+
+        def handle_call({:__supertester_sync__, opts}, _from, state) do
+          if Keyword.get(opts, :return_state, false) do
+            {:reply, {:ok, state}, state}
+          else
+            {:reply, :ok, state}
+          end
         end
       end
     end

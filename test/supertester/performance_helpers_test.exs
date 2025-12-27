@@ -101,7 +101,7 @@ defmodule Supertester.PerformanceHelpersTest do
           100,
           fn ->
             # Intentionally leak memory with larger chunks
-            Agent.update(agent, fn list -> [String.duplicate("x", 50000) | list] end)
+            Agent.update(agent, fn list -> [String.duplicate("x", 50_000) | list] end)
           end,
           # Very tight threshold to catch leak
           threshold: 0.02
@@ -228,7 +228,7 @@ defmodule Supertester.PerformanceHelpersTest do
         "fast" => fn -> 1 + 1 end,
         "medium" => fn -> Enum.sum(1..100) end,
         # Much larger to ensure measurable difference
-        "slow" => fn -> Enum.sum(1..10000) end
+        "slow" => fn -> Enum.sum(1..10_000) end
       }
 
       results = compare_performance(funcs)

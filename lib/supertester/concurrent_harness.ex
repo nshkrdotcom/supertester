@@ -93,64 +93,56 @@ defmodule Supertester.ConcurrentHarness do
     end
 
     defp normalize(%__MODULE__{} = scenario) do
-      unless is_function(scenario.setup, 0) do
-        raise ArgumentError, "scenario setup must be a zero-arity function"
-      end
-
-      if scenario.threads == [] do
-        raise ArgumentError, "scenario must define at least one thread script"
-      end
-
-      normalized_threads =
-        scenario.threads
-        |> Enum.map(fn script ->
-          script
-          |> List.wrap()
-          |> Enum.map(
-            &Supertester.ConcurrentHarness.normalize_operation(&1, scenario.default_operation)
-          )
-        end)
-
-      mailbox_opts =
-        case scenario.mailbox do
-          nil -> nil
-          opts when is_list(opts) -> opts
-          opts when is_map(opts) -> Enum.into(opts, [])
-          _ -> raise ArgumentError, "mailbox options must be a keyword list"
-        end
-
-      chaos_fun =
-        case scenario.chaos do
-          nil ->
-            nil
-
-          fun when is_function(fun, 2) ->
-            fun
-
-          other ->
-            raise ArgumentError, "chaos hook must be an arity-2 function, got #{inspect(other)}"
-        end
-
-      performance_expectations =
-        case scenario.performance_expectations do
-          nil ->
-            []
-
-          kv when is_list(kv) ->
-            kv
-
-          other ->
-            raise ArgumentError,
-                  "performance expectations must be a keyword list, got #{inspect(other)}"
-        end
+      validate_setup!(scenario)
+      validate_threads!(scenario)
 
       %__MODULE__{
         scenario
-        | threads: normalized_threads,
-          mailbox: mailbox_opts,
-          chaos: chaos_fun,
-          performance_expectations: performance_expectations
+        | threads: normalize_threads(scenario),
+          mailbox: normalize_mailbox(scenario.mailbox),
+          chaos: normalize_chaos(scenario.chaos),
+          performance_expectations: normalize_perf_expectations(scenario.performance_expectations)
       }
+    end
+
+    defp validate_setup!(%{setup: setup}) do
+      unless is_function(setup, 0) do
+        raise ArgumentError, "scenario setup must be a zero-arity function"
+      end
+    end
+
+    defp validate_threads!(%{threads: []}) do
+      raise ArgumentError, "scenario must define at least one thread script"
+    end
+
+    defp validate_threads!(_scenario), do: :ok
+
+    defp normalize_threads(%{threads: threads, default_operation: default_op}) do
+      Enum.map(threads, fn script ->
+        script
+        |> List.wrap()
+        |> Enum.map(&Supertester.ConcurrentHarness.normalize_operation(&1, default_op))
+      end)
+    end
+
+    defp normalize_mailbox(nil), do: nil
+    defp normalize_mailbox(opts) when is_list(opts), do: opts
+    defp normalize_mailbox(opts) when is_map(opts), do: Enum.into(opts, [])
+    defp normalize_mailbox(_), do: raise(ArgumentError, "mailbox options must be a keyword list")
+
+    defp normalize_chaos(nil), do: nil
+    defp normalize_chaos(fun) when is_function(fun, 2), do: fun
+
+    defp normalize_chaos(other) do
+      raise ArgumentError, "chaos hook must be an arity-2 function, got #{inspect(other)}"
+    end
+
+    defp normalize_perf_expectations(nil), do: []
+    defp normalize_perf_expectations(kv) when is_list(kv), do: kv
+
+    defp normalize_perf_expectations(other) do
+      raise ArgumentError,
+            "performance expectations must be a keyword list, got #{inspect(other)}"
     end
   end
 
@@ -209,7 +201,7 @@ defmodule Supertester.ConcurrentHarness do
     setup_fun =
       case Keyword.get(opts, :setup) do
         fun when is_function(fun, 0) -> fun
-        nil -> fn -> apply(module, :start_link, [server_opts]) end
+        nil -> fn -> module.start_link(server_opts) end
       end
 
     cleanup_fun =
@@ -249,7 +241,7 @@ defmodule Supertester.ConcurrentHarness do
       %{
         setup:
           Map.get(config, :setup) || Keyword.get(opts, :setup) ||
-            fn -> apply(module, :start_link, [Keyword.get(opts, :server_opts, [])]) end,
+            fn -> module.start_link(Keyword.get(opts, :server_opts, [])) end,
         cleanup: Map.get(config, :cleanup) || Keyword.get(opts, :cleanup) || (&default_cleanup/2),
         threads: Map.fetch!(config, :thread_scripts),
         timeout_ms: Map.get(config, :timeout_ms, Keyword.get(opts, :timeout_ms, 5_000)),

@@ -37,7 +37,6 @@ defmodule Supertester.ChaosHelpers do
           :immediate
           | {:after_ms, milliseconds :: pos_integer()}
           | {:random, probability :: float()}
-          | {:after_calls, count :: pos_integer()}
 
   @type chaos_report :: %{
           killed: non_neg_integer(),
@@ -73,7 +72,6 @@ defmodule Supertester.ChaosHelpers do
   - `:immediate` - Crash immediately
   - `{:after_ms, duration}` - Crash after duration milliseconds
   - `{:random, probability}` - Crash with given probability (0.0 to 1.0)
-  - `{:after_calls, count}` - Crash after N calls (not yet implemented)
 
   ## Examples
 
@@ -120,12 +118,6 @@ defmodule Supertester.ChaosHelpers do
     else
       :ok
     end
-  end
-
-  def inject_crash(target, {:after_calls, _count}, _opts) when is_pid(target) do
-    # TODO: Implement call counting crash injection
-    # This requires hooking into GenServer calls, which is complex
-    {:error, :not_yet_implemented}
   end
 
   @doc """
@@ -216,41 +208,9 @@ defmodule Supertester.ChaosHelpers do
   def simulate_resource_exhaustion(resource, opts \\ [])
 
   def simulate_resource_exhaustion(:process_limit, opts) do
-    # Use explicit spawn_count if provided, otherwise use percentage
-    spawn_count =
-      case Keyword.get(opts, :spawn_count) do
-        nil ->
-          percentage = Keyword.get(opts, :percentage, 0.05)
-          # Spawn percentage of a reasonable limit
-          trunc(10000 * percentage)
-
-        count ->
-          count
-      end
-
-    # Spawn processes
-    spawned =
-      for _ <- 1..spawn_count do
-        spawn(fn ->
-          receive do
-            :stop -> :ok
-          after
-            # Auto-cleanup after 60s
-            60_000 -> :ok
-          end
-        end)
-      end
-
-    cleanup_fn = fn ->
-      Enum.each(spawned, fn pid ->
-        if Process.alive?(pid) do
-          send(pid, :stop)
-        end
-      end)
-
-      :ok
-    end
-
+    spawn_count = get_process_spawn_count(opts)
+    spawned = spawn_resource_processes(spawn_count)
+    cleanup_fn = build_process_cleanup_fn(spawned)
     {:ok, cleanup_fn}
   end
 
@@ -310,6 +270,43 @@ defmodule Supertester.ChaosHelpers do
 
   def simulate_resource_exhaustion(_resource, _opts) do
     {:error, :unsupported_resource}
+  end
+
+  # Private helpers for simulate_resource_exhaustion/2
+  defp get_process_spawn_count(opts) do
+    case Keyword.get(opts, :spawn_count) do
+      nil ->
+        percentage = Keyword.get(opts, :percentage, 0.05)
+        trunc(10_000 * percentage)
+
+      count ->
+        count
+    end
+  end
+
+  defp spawn_resource_processes(spawn_count) do
+    for _ <- 1..spawn_count do
+      spawn(&wait_for_stop_message/0)
+    end
+  end
+
+  defp wait_for_stop_message do
+    receive do
+      :stop -> :ok
+    after
+      60_000 -> :ok
+    end
+  end
+
+  defp build_process_cleanup_fn(spawned) do
+    fn ->
+      Enum.each(spawned, &stop_if_alive/1)
+      :ok
+    end
+  end
+
+  defp stop_if_alive(pid) do
+    if Process.alive?(pid), do: send(pid, :stop)
   end
 
   @doc """
@@ -484,25 +481,23 @@ defmodule Supertester.ChaosHelpers do
   end
 
   defp execute_chaos_scenario(target, scenario) do
-    try do
-      case scenario.type do
-        :kill_children ->
-          chaos_kill_children(target, Map.to_list(Map.delete(scenario, :type)))
-          {:ok, scenario}
+    case scenario.type do
+      :kill_children ->
+        chaos_kill_children(target, Map.to_list(Map.delete(scenario, :type)))
+        {:ok, scenario}
 
-        :concurrent ->
-          run_concurrent_scenario(target, scenario)
+      :concurrent ->
+        run_concurrent_scenario(target, scenario)
 
-        _unknown ->
-          {:error, {scenario, :unknown_scenario_type}}
-      end
-    rescue
-      error ->
-        {:error, {scenario, error}}
-    catch
-      :exit, reason ->
-        {:error, {scenario, reason}}
+      _unknown ->
+        {:error, {scenario, :unknown_scenario_type}}
     end
+  rescue
+    error ->
+      {:error, {scenario, error}}
+  catch
+    :exit, reason ->
+      {:error, {scenario, reason}}
   end
 
   defp run_concurrent_scenario(target, scenario) do

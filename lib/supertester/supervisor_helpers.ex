@@ -94,7 +94,8 @@ defmodule Supertester.SupervisorHelpers do
         end)
 
       {:cascade_failure, start_child_id} ->
-        # TODO: Implement cascade failure simulation
+        # Cascade behavior is determined by the supervisor's strategy
+        # (one_for_all, rest_for_one) - we just trigger it by killing
         kill_child(supervisor, start_child_id)
     end
 
@@ -168,41 +169,9 @@ defmodule Supertester.SupervisorHelpers do
 
     stop_fn = fn ->
       current_children = Supervisor.which_children(supervisor)
-
-      # Detect restarts by comparing PIDs
-      events =
-        Enum.flat_map(initial_children, fn {id, initial_pid, _type, _mods} ->
-          case Enum.find(current_children, fn {cid, _cpid, _ctype, _cmods} -> cid == id end) do
-            {_id, ^initial_pid, _type, _mods} ->
-              # Same PID, no restart
-              []
-
-            {_id, new_pid, _type, _mods} when is_pid(new_pid) ->
-              # Different PID, restart occurred
-              [
-                {:child_terminated, id, initial_pid, :kill},
-                {:child_restarted, id, initial_pid, new_pid}
-              ]
-
-            _ ->
-              # Child removed
-              [{:child_terminated, id, initial_pid, :removed}]
-          end
-        end)
-
-      # Detect new children
-      new_starts =
-        Enum.flat_map(current_children, fn {id, pid, _type, _mods} ->
-          if Enum.any?(initial_children, fn {initial_id, _ipid, _itype, _imods} ->
-               initial_id == id
-             end) do
-            []
-          else
-            [{:child_started, id, pid}]
-          end
-        end)
-
-      events ++ new_starts
+      restart_events = detect_restart_events(initial_children, current_children)
+      new_start_events = detect_new_children(initial_children, current_children)
+      restart_events ++ new_start_events
     end
 
     {:ok, stop_fn}
@@ -255,28 +224,60 @@ defmodule Supertester.SupervisorHelpers do
     end
 
     # Check each child
-    Enum.each(expected_children, fn expected_child ->
-      case expected_child do
-        {child_id, nested_structure} when is_map(nested_structure) ->
-          # Nested supervisor - recurse
-          child = Enum.find(children, fn {id, _pid, _type, _mods} -> id == child_id end)
-
-          if child == nil do
-            raise "Expected child supervisor #{inspect(child_id)} not found"
-          end
-
-          {_id, child_pid, _type, _mods} = child
-          assert_supervision_tree_structure(child_pid, nested_structure)
-
-        {child_id, _module} ->
-          # Simple child - verify it exists
-          unless Enum.any?(children, fn {id, _pid, _type, _mods} -> id == child_id end) do
-            raise "Expected child #{inspect(child_id)} not found in supervisor"
-          end
-      end
-    end)
+    Enum.each(expected_children, &assert_expected_child(&1, children))
 
     :ok
+  end
+
+  defp assert_expected_child({child_id, nested_structure}, children)
+       when is_map(nested_structure) do
+    child = Enum.find(children, fn {id, _pid, _type, _mods} -> id == child_id end)
+
+    if child == nil do
+      raise "Expected child supervisor #{inspect(child_id)} not found"
+    end
+
+    {_id, child_pid, _type, _mods} = child
+    assert_supervision_tree_structure(child_pid, nested_structure)
+  end
+
+  defp assert_expected_child({child_id, _module}, children) do
+    unless Enum.any?(children, fn {id, _pid, _type, _mods} -> id == child_id end) do
+      raise "Expected child #{inspect(child_id)} not found in supervisor"
+    end
+  end
+
+  defp detect_restart_events(initial_children, current_children) do
+    Enum.flat_map(initial_children, fn {id, initial_pid, _type, _mods} ->
+      detect_child_restart_event(id, initial_pid, current_children)
+    end)
+  end
+
+  defp detect_child_restart_event(id, initial_pid, current_children) do
+    case Enum.find(current_children, fn {cid, _cpid, _ctype, _cmods} -> cid == id end) do
+      {_id, ^initial_pid, _type, _mods} ->
+        []
+
+      {_id, new_pid, _type, _mods} when is_pid(new_pid) ->
+        [
+          {:child_terminated, id, initial_pid, :kill},
+          {:child_restarted, id, initial_pid, new_pid}
+        ]
+
+      _ ->
+        [{:child_terminated, id, initial_pid, :removed}]
+    end
+  end
+
+  defp detect_new_children(initial_children, current_children) do
+    Enum.flat_map(current_children, fn {id, pid, _type, _mods} ->
+      already_exists? =
+        Enum.any?(initial_children, fn {initial_id, _ipid, _itype, _imods} ->
+          initial_id == id
+        end)
+
+      if already_exists?, do: [], else: [{:child_started, id, pid}]
+    end)
   end
 
   @doc """
@@ -371,19 +372,4 @@ defmodule Supertester.SupervisorHelpers do
         {:error, :child_not_found}
     end
   end
-
-  # Note: event_collector is currently unused but kept for future real-time event tracing
-  # defp event_collector(events) do
-  #   receive do
-  #     {:get_events, from} ->
-  #       send(from, {:events, Enum.reverse(events)})
-  #
-  #     event ->
-  #       event_collector([event | events])
-  #   after
-  #     10000 ->
-  #       # Timeout after 10 seconds of inactivity
-  #       event_collector(events)
-  #   end
-  # end
 end

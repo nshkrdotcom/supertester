@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-12-26
+
+### Added
+- **Supertester.TelemetryHelpers** for async-safe telemetry assertions with test-scoped handlers, buffering, and helper macros.
+- **Supertester.LoggerIsolation** for per-process Logger level isolation and safe log capture helpers.
+- **Supertester.ETSIsolation** for isolated ETS table creation, mirroring, and table injection with automatic cleanup.
+- ExUnitFoundation options `telemetry_isolation`, `logger_isolation`, and `ets_isolation`, plus tag-based telemetry, logger, and ETS configuration.
+- New telemetry events covering isolation setup, handler lifecycle, and ETS table operations.
+
+### Changed
+- **Supertester.IsolationContext** extended with telemetry, logger, and ETS isolation state fields.
+
 ## [0.3.1] - 2025-11-19
 
 ### Added
@@ -133,7 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
-[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.4.0
 [0.3.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.1
 [0.3.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.0
 [0.2.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.2.1

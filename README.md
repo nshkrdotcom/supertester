@@ -13,7 +13,7 @@
 
 **A battle-hardened OTP testing toolkit with chaos engineering, performance testing, and zero-sleep synchronization for building robust Elixir applications.**
 
-**Version 0.3.1** - Now with concurrent harness, telemetry instrumentation, and chaos-aware mailbox tooling!
+**Version 0.4.0** - Now with TelemetryHelpers, LoggerIsolation, and ETSIsolation for full async test isolation!
 
 ---
 
@@ -53,7 +53,7 @@ Add `supertester` as a dependency in your `mix.exs` file. It's only needed for t
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.3.1", only: :test}
+    {:supertester, "~> 0.4.0", only: :test}
   ]
 end
 ```
@@ -138,6 +138,12 @@ end
 - **`Supertester.PerformanceHelpers`**: Integrate performance testing directly into your test suite. Assert that your code meets performance SLAs, detect memory leaks, and prevent performance regressions before they hit production.
 
 - **`Supertester.Assertions`**: A rich set of custom assertions that understand OTP primitives. Go beyond simple equality checks with assertions like `assert_genserver_state/2`, `assert_all_children_alive/1`, and `assert_no_process_leaks/1` for more expressive and meaningful tests.
+
+- **`Supertester.TelemetryHelpers`**: Async-safe telemetry testing with per-test event isolation. Attach handlers that only receive events tagged with the current test ID, assert telemetry events with pattern matching, and capture events during function execution.
+
+- **`Supertester.LoggerIsolation`**: Per-process Logger level isolation and log capture. Set Logger levels that only affect the current test process, capture log messages during execution, and restore original levels automatically on test completion.
+
+- **`Supertester.ETSIsolation`**: Isolated ETS table creation, mirroring, and table injection with automatic cleanup. Create test-scoped ETS tables, mirror production tables for safe testing, and inject isolated tables into processes under test.
 
 ## Advanced Usage Examples
 
@@ -254,14 +260,14 @@ The user manual includes:
 
 Additional documentation, including the technical design, can be found in the `docs/` directory.
 
-## What's New in 0.2.0
+## What's New in 0.4.0
 
-- 🎉 **Zero Process.sleep**: Eliminated all timing-based synchronization
-- 🎉 **ChaosHelpers**: Complete chaos engineering toolkit
-- 🎉 **PerformanceHelpers**: Performance testing and regression detection
-- 🎉 **SupervisorHelpers**: Comprehensive supervision tree testing
-- 🎉 **TestableGenServer**: Automatic sync handler injection
-- 🎉 **37 tests**: All passing with 100% async execution
+- 🎉 **TelemetryHelpers**: Async-safe telemetry testing with per-test isolation
+- 🎉 **LoggerIsolation**: Per-process Logger level isolation and capture
+- 🎉 **ETSIsolation**: Isolated ETS table creation, mirroring, and injection
+- 🎉 **ExUnitFoundation options**: telemetry_isolation, logger_isolation, ets_isolation
+- 🎉 **IsolationContext extensions**: Telemetry, Logger, and ETS state fields
+- 🎉 **98 tests**: All passing with full async execution
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
 
