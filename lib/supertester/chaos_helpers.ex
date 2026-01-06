@@ -30,7 +30,6 @@ defmodule Supertester.ChaosHelpers do
       end
   """
 
-  require Logger
   alias Supertester.ConcurrentHarness
 
   @type crash_spec ::
@@ -373,8 +372,7 @@ defmodule Supertester.ChaosHelpers do
       assert report.failed == 0
   """
   @spec run_chaos_suite(pid(), [map()], keyword()) :: chaos_suite_report()
-  def run_chaos_suite(target, scenarios, opts \\ []) do
-    _timeout = Keyword.get(opts, :timeout, 30_000)
+  def run_chaos_suite(target, scenarios, _opts \\ []) do
     start_time = System.monotonic_time(:millisecond)
 
     results =

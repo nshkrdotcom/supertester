@@ -158,35 +158,11 @@ defmodule Supertester.UnifiedTestFoundation do
   end
 
   defp setup_registry_isolation(context) do
-    {isolation_context, test_id} = build_isolation_context(context, :registry)
-    registry_name = :"test_registry_#{test_id}"
-
-    {:ok, _} = Registry.start_link(keys: :unique, name: registry_name)
-
-    isolation_context =
-      isolation_context
-      |> Map.put(:registry, registry_name)
-      |> add_cleanup_callback(fn -> GenServer.stop(registry_name) end)
-
-    register_cleanup(isolation_context)
-
-    {:ok, attach_context(context, isolation_context)}
+    setup_isolation_with_registry(context, :registry)
   end
 
   defp setup_full_isolation(context) do
-    {isolation_context, test_id} = build_isolation_context(context, :full_isolation)
-    registry_name = :"test_registry_#{test_id}"
-
-    {:ok, _} = Registry.start_link(keys: :unique, name: registry_name)
-
-    isolation_context =
-      isolation_context
-      |> Map.put(:registry, registry_name)
-      |> add_cleanup_callback(fn -> GenServer.stop(registry_name) end)
-
-    register_cleanup(isolation_context)
-
-    {:ok, attach_context(context, isolation_context)}
+    setup_isolation_with_registry(context, :full_isolation)
   end
 
   defp setup_contamination_detection(context) do
@@ -201,6 +177,22 @@ defmodule Supertester.UnifiedTestFoundation do
       check_contamination(ctx)
       cleanup_isolation(ctx)
     end)
+
+    {:ok, attach_context(context, isolation_context)}
+  end
+
+  defp setup_isolation_with_registry(context, isolation_type) do
+    {isolation_context, test_id} = build_isolation_context(context, isolation_type)
+    registry_name = :"test_registry_#{test_id}"
+
+    {:ok, _} = Registry.start_link(keys: :unique, name: registry_name)
+
+    isolation_context =
+      isolation_context
+      |> Map.put(:registry, registry_name)
+      |> add_cleanup_callback(fn -> GenServer.stop(registry_name) end)
+
+    register_cleanup(isolation_context)
 
     {:ok, attach_context(context, isolation_context)}
   end

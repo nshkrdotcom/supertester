@@ -20,24 +20,27 @@ defmodule Supertester.ETSIsolation do
   @type table_ref :: :ets.tid() | atom()
   @type table_name :: atom()
 
-  @type create_opts :: [
-          name: atom(),
-          copy_from: table_ref(),
-          owner: pid(),
-          cleanup: boolean()
-        ]
+  @type create_opt ::
+          {:name, atom()}
+          | {:copy_from, table_ref()}
+          | {:owner, pid()}
+          | {:cleanup, boolean()}
 
-  @type mirror_opts :: [
-          include_data: boolean(),
-          access: table_access(),
-          cleanup: boolean()
-        ]
+  @type create_opts :: [table_option() | create_opt()]
 
-  @type inject_opts :: [
-          create: boolean(),
-          table_opts: [table_option()],
-          cleanup: boolean()
-        ]
+  @type mirror_opt ::
+          {:include_data, boolean()}
+          | {:access, table_access()}
+          | {:cleanup, boolean()}
+
+  @type mirror_opts :: [mirror_opt()]
+
+  @type inject_opt ::
+          {:create, boolean()}
+          | {:table_opts, [table_option()]}
+          | {:cleanup, boolean()}
+
+  @type inject_opts :: [inject_opt()]
 
   @ets_isolated_key :supertester_ets_isolated
   @ets_tables_key :supertester_ets_tables
@@ -109,7 +112,7 @@ defmodule Supertester.ETSIsolation do
   Create an isolated ETS table with automatic cleanup.
   """
   @spec create_isolated(table_type()) :: {:ok, table_ref()}
-  @spec create_isolated(table_type(), [table_option() | create_opts()]) :: {:ok, table_ref()}
+  @spec create_isolated(table_type(), create_opts()) :: {:ok, table_ref()}
   def create_isolated(type, opts \\ []) do
     ensure_isolation_setup!()
 
@@ -228,10 +231,8 @@ defmodule Supertester.ETSIsolation do
   @doc """
   Execute a function with a temporary ETS table that is deleted after scope.
   """
-  @dialyzer {:nowarn_function, with_table: 2}
   @spec with_table(table_type(), (table_ref() -> term())) :: term()
-  @dialyzer {:nowarn_function, with_table: 3}
-  @spec with_table(table_type(), [table_option()], (table_ref() -> term())) :: term()
+  @spec with_table(table_type(), create_opts(), (table_ref() -> term())) :: term()
   def with_table(type, fun) when is_function(fun, 1) do
     with_table(type, [], fun)
   end

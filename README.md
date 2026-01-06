@@ -13,17 +13,17 @@
 
 **A battle-hardened OTP testing toolkit with chaos engineering, performance testing, and zero-sleep synchronization for building robust Elixir applications.**
 
-**Version 0.4.0** - Now with TelemetryHelpers, LoggerIsolation, and ETSIsolation for full async test isolation!
+**Version 0.5.0** - Reliability fixes and tighter isolation across helpers, telemetry, and concurrency.
 
 ---
 
 ## The Problem: Flaky OTP Tests
 
 Are you tired of...
-- 😫 **Flaky tests** that fail randomly due to race conditions?
-- 📛 **`GenServer` name clashes** when running tests with `async: true`?
-- 🕰️ Littering your test suite with `Process.sleep/1` and hoping for the best?
-- 🤷‍♂️ Struggling to test process crashes, restarts, and complex supervision trees?
+- **Flaky tests** that fail randomly due to race conditions?
+- **`GenServer` name clashes** when running tests with `async: true`?
+- Littering your test suite with `Process.sleep/1` and hoping for the best?
+- Struggling to test process crashes, restarts, and complex supervision trees?
 
 Writing tests for concurrent systems is hard. Traditional testing methods often lead to fragile, non-deterministic, and slow test suites.
 
@@ -35,16 +35,16 @@ With `Supertester`, you can build a test suite that is **fast**, **parallel**, a
 
 ## Key Features
 
-- ✅ **Rock-Solid Test Isolation**: Run all your tests with `async: true` without fear of process name collisions or state leakage.
-- 🔄 **Zero Process.sleep**: Complete elimination of timing-based synchronization. Use proper OTP patterns for deterministic testing.
-- 🤖 **Powerful OTP Assertions**: Go beyond `assert`. Use `assert_process_restarted/2`, `assert_genserver_state/2`, and `assert_all_children_alive/1` for more expressive tests.
-- ✨ **Effortless Setup & Teardown**: Start isolated `GenServer`s and `Supervisor`s with a single line and trust `Supertester` to handle all the cleanup.
-- 💥 **Chaos Engineering**: Test system resilience with controlled fault injection, random process crashes, and resource exhaustion.
-- 🎯 **Supervision Tree Testing**: Verify restart strategies, trace supervision events, and validate tree structures.
-- ⚡ **Performance Testing**: Assert performance SLAs, detect memory leaks, and prevent regressions with built-in benchmarking.
-- 🔧 **TestableGenServer**: Automatic injection of sync handlers for deterministic async operation testing.
-- 🧵 **Concurrent Harness**: Describe multi-threaded scenarios once and let Supertester orchestrate calls, casts, chaos hooks, performance checks, and mailbox monitoring without extra glue.
-- 📊 **Telemetry Built-In**: Structured `:telemetry` events for scenario start/stop, mailbox sampling, chaos injections, and performance metrics so observability does not become an afterthought.
+- **Rock-Solid Test Isolation**: Run all your tests with `async: true` without fear of process name collisions or state leakage.
+- **Zero Process.sleep**: Complete elimination of timing-based synchronization. Use proper OTP patterns for deterministic testing.
+- **Powerful OTP Assertions**: Go beyond `assert`. Use `assert_process_restarted/2`, `assert_genserver_state/2`, and `assert_all_children_alive/1` for more expressive tests.
+- **Effortless Setup & Teardown**: Start isolated `GenServer`s and `Supervisor`s with a single line and trust `Supertester` to handle all the cleanup.
+- **Chaos Engineering**: Test system resilience with controlled fault injection, random process crashes, and resource exhaustion.
+- **Supervision Tree Testing**: Verify restart strategies, trace supervision events, and validate tree structures.
+- **Performance Testing**: Assert performance SLAs, detect memory leaks, and prevent regressions with built-in benchmarking.
+- **TestableGenServer**: Automatic injection of sync handlers for deterministic async operation testing.
+- **Concurrent Harness**: Describe multi-threaded scenarios once and let Supertester orchestrate calls, casts, chaos hooks, performance checks, and mailbox monitoring without extra glue.
+- **Telemetry Built-In**: Structured `:telemetry` events for scenario start/stop, mailbox sampling, chaos injections, and performance metrics so observability does not become an afterthought.
 
 ## Installation
 
@@ -53,7 +53,7 @@ Add `supertester` as a dependency in your `mix.exs` file. It's only needed for t
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.4.0", only: :test}
+    {:supertester, "~> 0.5.0", only: :test}
   ]
 end
 ```
@@ -117,7 +117,7 @@ end
 
 - **`Supertester.UnifiedTestFoundation`**: The isolation runtime powering Supertester. Call it directly from custom harnesses or advanced setups where you don’t want to use the ExUnit adapter.
 
-- **`Supertester.TestableGenServer`**: A simple behavior to make your `GenServer`s more testable. It automatically injects handlers to allow deterministic synchronization in your tests, completely eliminating the need for `Process.sleep/1`.
+- **`Supertester.TestableGenServer`**: A behavior that injects a `:__supertester_sync__` handler into your GenServers. This enables `cast_and_sync/2` to work deterministically: since GenServers process messages sequentially, a call that returns *after* a cast guarantees the cast was processed. No `Process.sleep/1` needed.
 
 - **`Supertester.OTPHelpers`**: Provides the essential tools for managing the lifecycle of isolated OTP processes. Functions like `setup_isolated_genserver/3` and `setup_isolated_supervisor/3` are your entry point for starting processes within the isolated test environment.
 
@@ -248,42 +248,9 @@ test "supervision tree structure" do
 end
 ```
 
-## Documentation
+### Concurrent Harness with Chaos and Telemetry
 
-For a comprehensive guide to all features, modules, and functions, please see the full **[User Manual](MANUAL.md)**.
-
-The user manual includes:
-- In-depth explanations of every module.
-- Detailed function signatures, parameters, and return values.
-- Practical code examples and recipes for common testing scenarios.
-- Best practices for writing robust tests.
-
-Additional documentation, including the technical design, can be found in the `docs/` directory.
-
-## What's New in 0.4.0
-
-- 🎉 **TelemetryHelpers**: Async-safe telemetry testing with per-test isolation
-- 🎉 **LoggerIsolation**: Per-process Logger level isolation and capture
-- 🎉 **ETSIsolation**: Isolated ETS table creation, mirroring, and injection
-- 🎉 **ExUnitFoundation options**: telemetry_isolation, logger_isolation, ets_isolation
-- 🎉 **IsolationContext extensions**: Telemetry, Logger, and ETS state fields
-- 🎉 **98 tests**: All passing with full async execution
-
-See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
-
-## Contributing
-
-Contributions are welcome! If you'd like to help improve `Supertester`, please feel free to:
-1.  Fork the repository.
-2.  Create a new feature branch.
-3.  Add your feature or bug fix.
-4.  Ensure all new code is covered by tests.
-5.  Open a pull request.
-
-## License
-
-This project is licensed under the MIT License.
-### Concurrency Harness + Chaos + Telemetry
+Orchestrate multi-threaded scenarios with chaos injection and observability:
 
 ```elixir
 test "counter stays non-negative under chaos" do
@@ -300,12 +267,10 @@ test "counter stays non-negative under chaos" do
 
   assert {:ok, report} = Supertester.ConcurrentHarness.run(scenario)
   assert report.metrics.total_operations == length(report.events)
-  assert report.chaos
-  assert report.performance.time_us
 end
 ```
 
-Attach to the telemetry events in your umbrella app:
+Attach to telemetry events for scenario timing:
 
 ```elixir
 :telemetry.attach(
@@ -317,3 +282,50 @@ Attach to the telemetry events in your umbrella app:
   nil
 )
 ```
+
+## Documentation
+
+For a comprehensive guide to all features, modules, and functions, please see the full **[User Manual](guides/MANUAL.md)**.
+
+The user manual includes:
+- In-depth explanations of every module.
+- Detailed function signatures, parameters, and return values.
+- Practical code examples and recipes for common testing scenarios.
+- Best practices for writing robust tests.
+
+Additional documentation lives in `guides/`:
+
+- [Documentation Index](guides/DOCS_INDEX.md)
+- [Quick Start](guides/QUICK_START.md)
+- [API Guide](guides/API_GUIDE.md)
+
+## Examples
+
+If you want a full Mix app that demonstrates every Supertester module, start here:
+
+- [Examples Index](examples/README.md)
+- [EchoLab Example App](examples/echo_lab/README.md)
+
+## What's New in 0.5.0
+
+- **Supervisor/OTP setup fixes**: Isolated supervisors now pass init args correctly.
+- **Name resolution improvements**: GenServer helpers support `{:global, _}` and `{:via, _, _}`.
+- **Telemetry robustness**: Buffering avoids Agent startup races under load.
+- **Mailbox monitoring stability**: Handles process exits cleanly during sampling.
+- **Assertions/doc clarity**: Scalar GenServer state expectations supported; supervisor strategy docs clarified.
+- **Removed**: `get_supervisor_strategy/1` (unfinished API) has been dropped.
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+
+## Contributing
+
+Contributions are welcome! If you'd like to help improve `Supertester`, please feel free to:
+1.  Fork the repository.
+2.  Create a new feature branch.
+3.  Add your feature or bug fix.
+4.  Ensure all new code is covered by tests.
+5.  Open a pull request.
+
+## License
+
+This project is licensed under the MIT License.

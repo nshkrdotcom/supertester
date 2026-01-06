@@ -54,38 +54,33 @@ defmodule Supertester.TestableGenServer do
   @doc false
   defmacro __before_compile__(_env) do
     quote do
-      # Only define if not already defined by user
-      if Module.defines?(__MODULE__, {:handle_call, 3}) do
-        # User has handle_call, prepend our clauses
-        defoverridable handle_call: 3
+      has_handle_call? = Module.defines?(__MODULE__, {:handle_call, 3})
 
-        def handle_call(:__supertester_sync__, _from, state) do
+      if has_handle_call? do
+        # Allow the existing handler to remain available via super/3.
+        defoverridable handle_call: 3
+      end
+
+      defp __supertester_sync_reply__(opts, state) do
+        if Keyword.get(opts, :return_state, false) do
+          {:reply, {:ok, state}, state}
+        else
           {:reply, :ok, state}
         end
+      end
 
-        def handle_call({:__supertester_sync__, opts}, _from, state) do
-          if Keyword.get(opts, :return_state, false) do
-            {:reply, {:ok, state}, state}
-          else
-            {:reply, :ok, state}
-          end
-        end
+      def handle_call(:__supertester_sync__, _from, state) do
+        __supertester_sync_reply__([], state)
+      end
 
-        # Delegate to original handle_call for other messages
+      def handle_call({:__supertester_sync__, opts}, _from, state) do
+        __supertester_sync_reply__(opts, state)
+      end
+
+      if has_handle_call? do
+        # Delegate to original handle_call for other messages.
         def handle_call(msg, from, state) do
           super(msg, from, state)
-        end
-      else
-        def handle_call(:__supertester_sync__, _from, state) do
-          {:reply, :ok, state}
-        end
-
-        def handle_call({:__supertester_sync__, opts}, _from, state) do
-          if Keyword.get(opts, :return_state, false) do
-            {:reply, {:ok, state}, state}
-          else
-            {:reply, :ok, state}
-          end
         end
       end
     end

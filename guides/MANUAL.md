@@ -1,6 +1,6 @@
 # Supertester User Manual
 
-**Version**: 0.2.0
+**Version**: 0.5.0
 
 Welcome to the comprehensive user manual for Supertester. This document provides a detailed overview of all modules and functions available in the Supertester toolkit.
 
@@ -33,6 +33,9 @@ Welcome to the comprehensive user manual for Supertester. This document provides
     *   [`Supertester.MessageHarness`](#supertestermessageharness)
 9.  [Telemetry & Diagnostics](#telemetry--diagnostics)
     *   [`Supertester.Telemetry`](#supertestertelemetry)
+    *   [`Supertester.TelemetryHelpers`](#supertestertelemetryhelpers)
+    *   [`Supertester.LoggerIsolation`](#supertesterloggerisolation)
+    *   [`Supertester.ETSIsolation`](#supertesteretsisolation)
 10. [Custom Assertions](#custom-assertions)
     *   [`Supertester.Assertions`](#supertesterassertions)
 11. [Practical Examples & Recipes](#practical-examples--recipes)
@@ -77,7 +80,7 @@ To get started with Supertester, add it as a dependency in your `mix.exs` file. 
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.2.0", only: :test}
+    {:supertester, "~> 0.5.0", only: :test}
   ]
 end
 ```
@@ -100,7 +103,7 @@ Returns the current version of the Supertester library.
 *   **Example:**
     ```elixir
     Supertester.version()
-    #=> "0.2.0"
+    #=> "0.5.0"
     ```
 
 ### `Supertester.ExUnitFoundation`
@@ -126,6 +129,31 @@ end
 *   `:registry`: Uses a dedicated registry for process isolation (async-friendly).
 *   `:full_isolation`: Provides complete process and ETS table isolation. This is the recommended mode (async-friendly).
 *   `:contamination_detection`: Detects if a test leaks processes or ETS tables (runs synchronously).
+
+**Additional Isolation Options:**
+
+*   `telemetry_isolation: true` enables `Supertester.TelemetryHelpers`.
+*   `logger_isolation: true` enables `Supertester.LoggerIsolation`.
+*   `ets_isolation: [...]` mirrors named ETS tables into isolated copies.
+*   `@tag telemetry_events: [...]` auto-attaches isolated telemetry handlers.
+*   `@tag ets_tables: [...]` mirrors tables for a single test.
+*   `@tag logger_level: :debug` overrides the process log level for the test.
+
+```elixir
+defmodule MyApp.MyTest do
+  use Supertester.ExUnitFoundation,
+    isolation: :full_isolation,
+    telemetry_isolation: true,
+    logger_isolation: true,
+    ets_isolation: [:my_table]
+
+  @tag telemetry_events: [[:supertester, :concurrent, :scenario, :stop]]
+  @tag logger_level: :debug
+  test "isolation extensions", _context do
+    # ...
+  end
+end
+```
 
 ### `Supertester.UnifiedTestFoundation`
 
@@ -637,6 +665,74 @@ Attach handlers with `:telemetry.attach/4` or `attach_many/4`:
   nil
 )
 ```
+
+---
+
+### `Supertester.TelemetryHelpers`
+
+TelemetryHelpers provides per-test telemetry isolation, so your tests only receive
+events tagged with the current test id. This prevents cross-test noise when running
+`async: true`.
+
+```elixir
+{:ok, _test_id} = Supertester.TelemetryHelpers.setup_telemetry_isolation()
+{:ok, _handler} = Supertester.TelemetryHelpers.attach_isolated([:my, :event])
+
+Supertester.TelemetryHelpers.emit_with_context([:my, :event], %{value: 1}, %{})
+assert Supertester.TelemetryHelpers.assert_telemetry([:my, :event])
+```
+
+Key helpers:
+
+*   `setup_telemetry_isolation/0` and `setup_telemetry_isolation/1`
+*   `attach_isolated/2` with `passthrough`, `buffer`, `filter_key`, and `transform`
+*   `assert_telemetry/1-3`, `refute_telemetry/2`, `assert_telemetry_count/2`, `flush_telemetry/1`
+*   `with_telemetry/2` and `emit_with_context/3`
+
+---
+
+### `Supertester.LoggerIsolation`
+
+LoggerIsolation provides process-scoped logger levels and log capture helpers.
+
+```elixir
+:ok = Supertester.LoggerIsolation.setup_logger_isolation()
+Supertester.LoggerIsolation.isolate_level(:debug)
+
+{log, _result} =
+  Supertester.LoggerIsolation.capture_isolated(:debug, fn ->
+    Logger.debug("hello")
+    :ok
+  end)
+```
+
+Key helpers:
+
+*   `setup_logger_isolation/0` and `setup_logger_isolation/1`
+*   `isolate_level/1`, `restore_level/0`, `get_isolated_level/0`
+*   `capture_isolated/2`, `capture_isolated!/2`, `with_level/2`, `with_level_and_capture/2`
+
+---
+
+### `Supertester.ETSIsolation`
+
+ETSIsolation enables per-test ETS tables, mirroring, and safe injections.
+
+```elixir
+:ok = Supertester.ETSIsolation.setup_ets_isolation()
+{:ok, table} = Supertester.ETSIsolation.create_isolated(:set, name: :temp_table)
+
+{:ok, restore} =
+  Supertester.ETSIsolation.inject_table(MyModule, :table_name, :temp_table)
+
+restore.()
+```
+
+Key helpers:
+
+*   `setup_ets_isolation/0-2`
+*   `create_isolated/1-2`, `mirror_table/1-2`
+*   `inject_table/3-4`, `with_table/2-3`
 
 ---
 

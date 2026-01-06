@@ -75,6 +75,8 @@ defmodule Supertester.SupervisorHelpers do
   @spec test_restart_strategy(Supervisor.supervisor(), atom(), restart_scenario()) ::
           test_result()
   def test_restart_strategy(supervisor, _strategy, scenario) do
+    supervisor_pid = resolve_supervisor_pid(supervisor)
+
     # Get initial state
     initial_children = Supervisor.which_children(supervisor)
 
@@ -124,7 +126,7 @@ defmodule Supertester.SupervisorHelpers do
     %{
       restarted: restarted,
       not_restarted: not_restarted,
-      supervisor_alive: Process.alive?(supervisor)
+      supervisor_alive: is_pid(supervisor_pid) and Process.alive?(supervisor_pid)
     }
   end
 
@@ -337,27 +339,6 @@ defmodule Supertester.SupervisorHelpers do
     active
   end
 
-  @doc """
-  Gets the restart strategy of a supervisor.
-
-  Note: This is a best-effort function as Elixir doesn't provide direct access
-  to the strategy. Returns `:unknown` if strategy cannot be determined.
-
-  ## Parameters
-
-  - `supervisor` - The supervisor PID
-
-  ## Returns
-
-  Strategy atom or `:unknown`
-  """
-  @spec get_supervisor_strategy(Supervisor.supervisor()) :: atom()
-  def get_supervisor_strategy(_supervisor) do
-    # Elixir doesn't expose supervisor strategy directly
-    # This would require inspecting internal state which is not reliable
-    :unknown
-  end
-
   # Private functions
 
   defp kill_child(supervisor, child_id) do
@@ -372,4 +353,23 @@ defmodule Supertester.SupervisorHelpers do
         {:error, :child_not_found}
     end
   end
+
+  defp resolve_supervisor_pid(pid) when is_pid(pid), do: pid
+  defp resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
+
+  defp resolve_supervisor_pid({:global, name}) do
+    case :global.whereis_name(name) do
+      :undefined -> nil
+      pid -> pid
+    end
+  end
+
+  defp resolve_supervisor_pid({:via, module, name}) do
+    case module.whereis_name(name) do
+      :undefined -> nil
+      pid -> pid
+    end
+  end
+
+  defp resolve_supervisor_pid(_), do: nil
 end

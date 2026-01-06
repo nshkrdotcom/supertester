@@ -1,19 +1,24 @@
 # Supertester API Guide
-**Version**: 0.2.0
-**Last Updated**: October 7, 2025
+**Version**: 0.5.0
+**Last Updated**: January 6, 2026
 
-Complete reference guide for all Supertester modules and functions.
+Reference guide for the primary Supertester modules and workflows.
 
 ---
 
 ## Table of Contents
 
 1. [Core Modules](#core-modules)
-2. [OTP Testing](#otp-testing)
-3. [Chaos Engineering](#chaos-engineering)
-4. [Performance Testing](#performance-testing)
-5. [Assertions](#assertions)
-6. [Quick Reference](#quick-reference)
+2. [Supertester.ConcurrentHarness](#supertesterconcurrentharness)
+3. [Supertester.PropertyHelpers](#supertesterpropertyhelpers)
+4. [Supertester.MessageHarness](#supertestermessageharness)
+5. [Supertester.Telemetry](#supertestertelemetry)
+6. [Isolation Extensions](#isolation-extensions)
+7. [OTP Testing](#otp-testing)
+8. [Chaos Engineering](#chaos-engineering)
+9. [Performance Testing](#performance-testing)
+10. [Assertions](#assertions)
+11. [Quick Reference](#quick-reference)
 
 ---
 
@@ -25,7 +30,7 @@ Main module providing version information.
 
 ```elixir
 Supertester.version()
-# => "0.2.0"
+# => "0.5.0"
 ```
 
 ### Supertester.ExUnitFoundation
@@ -49,6 +54,31 @@ defmodule MyApp.MyTest do
     # context.isolation_context contains isolation info
     {:ok, server} = setup_isolated_genserver(MyServer)
     # Test runs in complete isolation
+  end
+end
+```
+
+#### Additional Isolation Options
+
+- `telemetry_isolation: true` enables `Supertester.TelemetryHelpers` for the test process.
+- `logger_isolation: true` enables `Supertester.LoggerIsolation` for the test process.
+- `ets_isolation: [...]` mirrors named ETS tables into isolated copies.
+- `@tag telemetry_events: [...]` auto-attaches isolated telemetry handlers.
+- `@tag ets_tables: [...]` mirrors tables for the current test.
+- `@tag logger_level: :debug` overrides the logger level for the test process.
+
+```elixir
+defmodule MyApp.MyTest do
+  use Supertester.ExUnitFoundation,
+    isolation: :full_isolation,
+    telemetry_isolation: true,
+    logger_isolation: true,
+    ets_isolation: [:my_table]
+
+  @tag telemetry_events: [[:supertester, :concurrent, :scenario, :stop]]
+  @tag logger_level: :debug
+  test "captures telemetry + logs", _context do
+    # ...
   end
 end
 ```
@@ -279,6 +309,70 @@ All helpers ultimately call `emit/3`, so you can attach via `:telemetry.attach/4
   nil
 )
 ```
+
+---
+
+## Isolation Extensions
+
+### Supertester.TelemetryHelpers
+
+Per-test telemetry isolation that only delivers events tagged with the current test id.
+
+```elixir
+{:ok, _test_id} = Supertester.TelemetryHelpers.setup_telemetry_isolation()
+{:ok, _handler} = Supertester.TelemetryHelpers.attach_isolated([:my, :event])
+
+Supertester.TelemetryHelpers.emit_with_context([:my, :event], %{value: 1}, %{})
+assert Supertester.TelemetryHelpers.assert_telemetry([:my, :event])
+```
+
+Key helpers:
+
+- `setup_telemetry_isolation/0` and `setup_telemetry_isolation/1`
+- `attach_isolated/2` with `passthrough`, `buffer`, `filter_key`, and `transform`
+- `assert_telemetry/1-3`, `refute_telemetry/2`, `assert_telemetry_count/2`, `flush_telemetry/1`
+- `with_telemetry/2` and `emit_with_context/3`
+
+### Supertester.LoggerIsolation
+
+Process-scoped Logger isolation with convenience capture helpers.
+
+```elixir
+:ok = Supertester.LoggerIsolation.setup_logger_isolation()
+Supertester.LoggerIsolation.isolate_level(:debug)
+
+{log, result} =
+  Supertester.LoggerIsolation.capture_isolated(:debug, fn ->
+    Logger.debug("hello")
+    :ok
+  end)
+```
+
+Key helpers:
+
+- `setup_logger_isolation/0` and `setup_logger_isolation/1`
+- `isolate_level/1`, `restore_level/0`, `get_isolated_level/0`
+- `capture_isolated/2`, `capture_isolated!/2`, `with_level/2`, `with_level_and_capture/2`
+
+### Supertester.ETSIsolation
+
+Per-test ETS table isolation and safe injection helpers.
+
+```elixir
+:ok = Supertester.ETSIsolation.setup_ets_isolation()
+{:ok, table} = Supertester.ETSIsolation.create_isolated(:set, name: :temp_table)
+
+{:ok, restore} =
+  Supertester.ETSIsolation.inject_table(MyModule, :table_name, :temp_table)
+
+restore.()
+```
+
+Key helpers:
+
+- `setup_ets_isolation/0-2`
+- `create_isolated/1-2`, `mirror_table/1-2`
+- `inject_table/3-4`, `with_table/2-3`
 
 ---
 
@@ -1046,6 +1140,18 @@ test "no memory leak" do
 end
 ```
 
+#### Pattern 6: Telemetry Isolation
+
+```elixir
+use Supertester.ExUnitFoundation, telemetry_isolation: true
+
+test "telemetry is scoped to this test" do
+  {:ok, _} = Supertester.TelemetryHelpers.attach_isolated([:my, :event])
+  Supertester.TelemetryHelpers.emit_with_context([:my, :event], %{}, %{})
+  assert Supertester.TelemetryHelpers.assert_telemetry([:my, :event])
+end
+```
+
 ### Import Patterns
 
 ```elixir
@@ -1226,13 +1332,12 @@ end
 
 ## See Also
 
-- [Technical Design Document](docs/technical-design-enhancement-20251007.md)
-- [Implementation Status](docs/implementation-status-final.md)
-- [CHANGELOG](CHANGELOG.md)
+- [Documentation Index](DOCS_INDEX.md)
+- [CHANGELOG](../CHANGELOG.md)
 - [HexDocs](https://hexdocs.pm/supertester)
 
 ---
 
-**Version**: 0.2.0
+**Version**: 0.5.0
 **License**: MIT
 **Maintainer**: nshkrdotcom

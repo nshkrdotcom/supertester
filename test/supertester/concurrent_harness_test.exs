@@ -73,6 +73,27 @@ defmodule Supertester.ConcurrentHarnessTest do
     assert {:error, {:invariant_failed, :returned_false}} = ConcurrentHarness.run(scenario)
   end
 
+  test "default cleanup stops the subject even when invariant fails" do
+    parent = self()
+
+    scenario =
+      ConcurrentHarness.simple_genserver_scenario(
+        CounterServer,
+        [{:call, :value}],
+        1,
+        setup: fn ->
+          {:ok, pid} = CounterServer.start_link([])
+          send(parent, {:subject, pid})
+          {:ok, pid, %{}}
+        end,
+        invariant: fn _, _ -> false end
+      )
+
+    assert {:error, {:invariant_failed, :returned_false}} = ConcurrentHarness.run(scenario)
+    assert_receive {:subject, pid}
+    refute Process.alive?(pid)
+  end
+
   test "chaos hook runs alongside scenario" do
     parent = self()
 
@@ -139,9 +160,7 @@ defmodule Supertester.ConcurrentHarnessTest do
       :telemetry.attach_many(
         handler_id,
         events,
-        fn event, measurements, metadata, caller ->
-          send(caller, {:telemetry, event, measurements, metadata})
-        end,
+        &Supertester.ConcurrentHarnessTest.handle_telemetry/4,
         self()
       )
 
@@ -166,5 +185,9 @@ defmodule Supertester.ConcurrentHarnessTest do
     assert meas.duration_ms >= 0
     assert meas.status in [:ok, :error]
     assert Map.has_key?(stop_metadata, :scenario_id)
+  end
+
+  def handle_telemetry(event, measurements, metadata, caller) do
+    send(caller, {:telemetry, event, measurements, metadata})
   end
 end

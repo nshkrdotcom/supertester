@@ -1,47 +1,264 @@
-<svg width="256" height="256" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="logoTitle logoDesc">
-  <title id="logoTitle">Supertester DSPy Orchestrator Logo</title>
-  <desc id="logoDesc">A professional logo for Supertester, a DSPy orchestrator with a high-performance 'snakepit' core. The design features two stylized serpents intertwined within a hexagon, symbolizing orchestration and AI-driven prompting. The color scheme is dark with vibrant green and purple accents, conveying a modern, high-tech feel.</desc>
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">Supertester Logo</title>
+  <desc id="logoDesc">A professional hexagonal logo for Supertester, a battle-hardened OTP testing toolkit for Elixir. Features a bold checkmark shield with circuit patterns representing test isolation, chaos engineering, and robust synchronization.</desc>
 
   <defs>
-    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1A1A2E; stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#12121A; stop-opacity:1" />
+    <!-- Primary deep space gradient for hexagon background -->
+    <linearGradient id="hexBgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A0A14"/>
+      <stop offset="35%" stop-color="#1F0D18"/>
+      <stop offset="70%" stop-color="#2A1320"/>
+      <stop offset="100%" stop-color="#1C0F17"/>
     </linearGradient>
-    <linearGradient id="snakeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00F260" />
-      <stop offset="100%" stop-color="#0575E6" />
+
+    <!-- Amber-gold accent gradient for primary elements -->
+    <linearGradient id="primaryGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D97706"/>
+      <stop offset="50%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#FCD34D"/>
     </linearGradient>
-    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur" />
+
+    <!-- Rose-coral gradient for secondary accents -->
+    <linearGradient id="cyanGradient" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E11D48"/>
+      <stop offset="50%" stop-color="#FB7185"/>
+      <stop offset="100%" stop-color="#FDA4AF"/>
+    </linearGradient>
+
+    <!-- Teal chaos energy gradient -->
+    <linearGradient id="chaosGradient" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#0D9488"/>
+      <stop offset="50%" stop-color="#2DD4BF"/>
+      <stop offset="100%" stop-color="#5EEAD4"/>
+    </linearGradient>
+
+    <!-- Radial glow for center shield -->
+    <radialGradient id="shieldGlow" cx="50%" cy="40%" r="60%" fx="50%" fy="35%">
+      <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.4"/>
+      <stop offset="50%" stop-color="#D97706" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#B45309" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Metallic rim gradient for hexagon border -->
+    <linearGradient id="rimGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5F1E3A"/>
+      <stop offset="25%" stop-color="#BE185D"/>
+      <stop offset="50%" stop-color="#F472B6"/>
+      <stop offset="75%" stop-color="#BE185D"/>
+      <stop offset="100%" stop-color="#5F1E3A"/>
+    </linearGradient>
+
+    <!-- Inner rim highlight -->
+    <linearGradient id="innerRimGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#FBBF24" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0.6"/>
+    </linearGradient>
+
+    <!-- Neon glow filter for checkmark -->
+    <filter id="checkGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur1"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur2"/>
       <feMerge>
-        <feMergeNode in="blur" />
-        <feMergeNode in="SourceGraphic" />
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
+
+    <!-- Subtle outer glow for hexagon -->
+    <filter id="hexGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="blur"/>
+      <feOffset in="blur" dx="0" dy="0" result="offsetBlur"/>
+      <feFlood flood-color="#F59E0B" flood-opacity="0.35"/>
+      <feComposite in2="offsetBlur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Circuit node glow -->
+    <filter id="nodeGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Chaos lightning filter -->
+    <filter id="chaosGlowFilter" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle inner shadow for depth -->
+    <filter id="innerShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
+      <feOffset dx="1" dy="2"/>
+      <feComposite in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.4 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Hexagon clip path -->
+    <clipPath id="hexClip">
+      <polygon points="100,8 180,54 180,146 100,192 20,146 20,54"/>
+    </clipPath>
   </defs>
 
-  <!-- Background Hexagon -->
-  <path d="M60 5 L110 32.5 V 87.5 L60 115 L10 87.5 V 32.5 Z" fill="url(#bgGradient)" stroke="#4A4458" stroke-width="2"/>
+  <!-- Outer glow layer -->
+  <polygon 
+    points="100,8 180,54 180,146 100,192 20,146 20,54" 
+    fill="none" 
+    stroke="url(#rimGradient)" 
+    stroke-width="3"
+    filter="url(#hexGlow)"/>
 
-  <!-- Intertwined Serpents -->
-  <g transform="translate(0, 2)" filter="url(#neonGlow)">
-    <!-- Serpent 1 -->
-    <path d="M 45,80 C 25,70 35,40 50,30 S 70,25 70,45 S 50,60 60,70 S 80,85 75,95" stroke="url(#snakeGradient)" stroke-width="4" fill="none" stroke-linecap="round"/>
-    <!-- Serpent 2 -->
-    <path d="M 75,80 C 95,70 85,40 70,30 S 50,25 50,45 S 70,60 60,70 S 40,85 45,95" stroke="#C875FF" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <!-- Main hexagon background -->
+  <polygon 
+    points="100,8 180,54 180,146 100,192 20,146 20,54" 
+    fill="url(#hexBgGradient)"/>
+
+  <!-- Subtle radial glow inside hexagon -->
+  <polygon 
+    points="100,8 180,54 180,146 100,192 20,146 20,54" 
+    fill="url(#shieldGlow)"/>
+
+  <!-- Hexagon border with metallic effect -->
+  <polygon 
+    points="100,8 180,54 180,146 100,192 20,146 20,54" 
+    fill="none" 
+    stroke="url(#rimGradient)" 
+    stroke-width="2.5"/>
+
+  <!-- Inner hexagon border accent -->
+  <polygon 
+    points="100,14 174,57 174,143 100,186 26,143 26,57" 
+    fill="none" 
+    stroke="url(#innerRimGradient)" 
+    stroke-width="1"/>
+
+  <!-- Circuit board background pattern -->
+  <g opacity="0.25" clip-path="url(#hexClip)">
+    <!-- Horizontal traces -->
+    <line x1="30" y1="70" x2="70" y2="70" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
+    <line x1="130" y1="70" x2="170" y2="70" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
+    <line x1="30" y1="130" x2="70" y2="130" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
+    <line x1="130" y1="130" x2="170" y2="130" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
     
-    <!-- Serpent Heads -->
-    <g fill="#FFFFFF">
-      <circle cx="45" cy="95" r="3" fill="#C875FF"/>
-      <circle cx="75" cy="95" r="3" fill="#0575E6"/>
-    </g>
+    <!-- Vertical traces -->
+    <line x1="50" y1="50" x2="50" y2="85" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
+    <line x1="150" y1="50" x2="150" y2="85" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
+    <line x1="50" y1="115" x2="50" y2="150" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
+    <line x1="150" y1="115" x2="150" y2="150" stroke="#FB7185" stroke-width="1" stroke-linecap="round"/>
+    
+    <!-- Diagonal connectors -->
+    <line x1="65" y1="55" x2="85" y2="75" stroke="#FB7185" stroke-width="0.8" stroke-linecap="round"/>
+    <line x1="135" y1="55" x2="115" y2="75" stroke="#FB7185" stroke-width="0.8" stroke-linecap="round"/>
+    <line x1="65" y1="145" x2="85" y2="125" stroke="#FB7185" stroke-width="0.8" stroke-linecap="round"/>
+    <line x1="135" y1="145" x2="115" y2="125" stroke="#FB7185" stroke-width="0.8" stroke-linecap="round"/>
   </g>
 
-  <!-- Abstract Prompt/Code Elements -->
-  <g fill="#4A4458" opacity="0.6">
-    <text x="25" y="40" font-family="monospace" font-size="10" fill-opacity="0.5">&lt;></text>
-    <text x="85" y="75" font-family="monospace" font-size="10" fill-opacity="0.5">{...}</text>
-    <circle cx="30" cy="60" r="1.5"/>
-    <circle cx="90" cy="50" r="1.5"/>
+  <!-- Circuit nodes (small dots at trace intersections) -->
+  <g fill="url(#cyanGradient)" filter="url(#nodeGlow)" opacity="0.7">
+    <circle cx="50" cy="70" r="2.5"/>
+    <circle cx="150" cy="70" r="2.5"/>
+    <circle cx="50" cy="130" r="2.5"/>
+    <circle cx="150" cy="130" r="2.5"/>
+    <circle cx="70" cy="70" r="1.8"/>
+    <circle cx="130" cy="70" r="1.8"/>
+    <circle cx="70" cy="130" r="1.8"/>
+    <circle cx="130" cy="130" r="1.8"/>
+  </g>
+
+  <!-- Chaos lightning bolts (small, subtle) -->
+  <g stroke="url(#chaosGradient)" stroke-width="1.5" fill="none" filter="url(#chaosGlowFilter)" opacity="0.6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Top left lightning -->
+    <path d="M38,48 L44,58 L40,58 L46,68"/>
+    <!-- Top right lightning -->
+    <path d="M162,48 L156,58 L160,58 L154,68"/>
+    <!-- Bottom left lightning -->
+    <path d="M38,152 L44,142 L40,142 L46,132"/>
+    <!-- Bottom right lightning -->
+    <path d="M162,152 L156,142 L160,142 L154,132"/>
+  </g>
+
+  <!-- Central shield/badge shape -->
+  <g filter="url(#innerShadow)">
+    <!-- Shield base -->
+    <path 
+      d="M100,45 L135,60 L135,105 C135,125 118,142 100,152 C82,142 65,125 65,105 L65,60 Z" 
+      fill="#1C0F17" 
+      stroke="url(#primaryGradient)" 
+      stroke-width="2"/>
+    
+    <!-- Shield inner gradient -->
+    <path 
+      d="M100,50 L130,63 L130,103 C130,120 115,135 100,144 C85,135 70,120 70,103 L70,63 Z" 
+      fill="url(#hexBgGradient)" 
+      opacity="0.9"/>
+  </g>
+
+  <!-- Checkmark with neon glow effect -->
+  <g filter="url(#checkGlow)">
+    <!-- Main checkmark -->
+    <path 
+      d="M78,100 L93,115 L122,80" 
+      fill="none" 
+      stroke="url(#primaryGradient)" 
+      stroke-width="8" 
+      stroke-linecap="round" 
+      stroke-linejoin="round"/>
+  </g>
+
+  <!-- Checkmark highlight overlay for 3D effect -->
+  <path 
+    d="M80,98 L93,111 L120,80" 
+    fill="none" 
+    stroke="#FCD34D" 
+    stroke-width="2" 
+    stroke-linecap="round" 
+    stroke-linejoin="round"
+    opacity="0.6"/>
+
+  <!-- Corner accent triangles -->
+  <g fill="url(#cyanGradient)" opacity="0.4">
+    <polygon points="100,14 110,20 100,26 90,20"/>
+    <polygon points="100,186 110,180 100,174 90,180"/>
+  </g>
+
+  <!-- Decorative process nodes representing OTP processes -->
+  <g fill="url(#primaryGradient)" filter="url(#nodeGlow)">
+    <!-- Top center -->
+    <circle cx="100" cy="28" r="3"/>
+    <!-- Bottom center -->
+    <circle cx="100" cy="172" r="3"/>
+    <!-- Left processes -->
+    <circle cx="32" cy="80" r="2"/>
+    <circle cx="32" cy="120" r="2"/>
+    <!-- Right processes -->
+    <circle cx="168" cy="80" r="2"/>
+    <circle cx="168" cy="120" r="2"/>
+  </g>
+
+  <!-- Subtle pulse rings around center -->
+  <g stroke="url(#primaryGradient)" fill="none" opacity="0.15">
+    <circle cx="100" cy="100" r="55" stroke-width="1"/>
+    <circle cx="100" cy="100" r="70" stroke-width="0.5"/>
+  </g>
+
+  <!-- Tiny status dots for "test passing" indication -->
+  <g fill="#F59E0B">
+    <circle cx="85" cy="65" r="2"/>
+    <circle cx="100" cy="58" r="2"/>
+    <circle cx="115" cy="65" r="2"/>
   </g>
 </svg>

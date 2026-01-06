@@ -339,12 +339,11 @@ defmodule Supertester.TelemetryHelpers do
   defp buffer_event(parent, message) do
     buffer_name = :"supertester_telemetry_buffer_#{:erlang.phash2(parent)}"
 
-    case Process.whereis(buffer_name) do
-      nil ->
-        {:ok, _} = Agent.start_link(fn -> [] end, name: buffer_name)
+    case Agent.start_link(fn -> [] end, name: buffer_name) do
+      {:ok, _} ->
         Agent.update(buffer_name, &[message | &1])
 
-      _pid ->
+      {:error, {:already_started, _}} ->
         Agent.update(buffer_name, &[message | &1])
     end
   end

@@ -127,6 +127,14 @@ defmodule Supertester.Assertions do
     end
   end
 
+  defp validate_genserver_state(actual_state, expected) do
+    if actual_state == expected do
+      :ok
+    else
+      raise "Expected GenServer state to be #{inspect(expected)}, got #{inspect(actual_state)}"
+    end
+  end
+
   @doc """
   Asserts that a GenServer is responsive.
 
@@ -178,12 +186,17 @@ defmodule Supertester.Assertions do
   end
 
   @doc """
-  Asserts that a supervisor has the expected strategy.
+  Asserts that a supervisor is accessible and running.
+
+  Note: This function verifies the supervisor is alive and responding to
+  queries but does not validate the actual restart strategy. Strategy
+  verification requires access to supervisor internals that are not
+  exposed through the public API.
 
   ## Parameters
 
   - `supervisor` - The supervisor pid or name
-  - `expected_strategy` - The expected supervision strategy
+  - `_expected_strategy` - Currently unused (reserved for future implementation)
 
   ## Example
 
@@ -191,16 +204,13 @@ defmodule Supertester.Assertions do
   """
   @spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
   def assert_supervisor_strategy(supervisor, _expected_strategy) do
-    _children = Supervisor.which_children(supervisor)
-    _count = Supervisor.count_children(supervisor)
-
-    # This is a simplified check - in practice, strategy detection
-    # would require more sophisticated analysis
-    # For now, we just verify the supervisor is accessible
+    # Verify supervisor is accessible by querying it
+    _ = Supervisor.which_children(supervisor)
+    _ = Supervisor.count_children(supervisor)
     :ok
   catch
     :exit, reason ->
-      raise "Failed to check supervisor strategy: #{inspect(reason)}"
+      raise "Failed to access supervisor: #{inspect(reason)}"
   end
 
   @doc """

@@ -1,5 +1,5 @@
 # Supertester Quick Start Guide
-**Version**: 0.2.0
+**Version**: 0.5.0
 
 Get up and running with Supertester in 5 minutes!
 
@@ -12,7 +12,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.2.0", only: :test}
+    {:supertester, "~> 0.5.0", only: :test}
   ]
 end
 ```
@@ -30,7 +30,7 @@ mix deps.get
 
 ```elixir
 defmodule MyApp.CounterTest do
-  use ExUnit.Case, async: true
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
   import Supertester.{OTPHelpers, GenServerHelpers, Assertions}
 
   test "counter works" do
@@ -53,7 +53,7 @@ end
 
 ```elixir
 test "system survives worker crashes" do
-  import Supertester.ChaosHelpers
+  import Supertester.{ChaosHelpers, OTPHelpers, Assertions}
 
   {:ok, supervisor} = setup_isolated_supervisor(WorkerSupervisor)
 
@@ -78,7 +78,7 @@ end
 
 ```elixir
 test "meets performance SLA" do
-  import Supertester.PerformanceHelpers
+  import Supertester.{OTPHelpers, PerformanceHelpers}
 
   {:ok, api} = setup_isolated_genserver(APIServer)
 
@@ -99,7 +99,7 @@ end
 
 ```elixir
 test "one_for_one restarts only failed child" do
-  import Supertester.SupervisorHelpers
+  import Supertester.{OTPHelpers, SupervisorHelpers}
 
   {:ok, supervisor} = setup_isolated_supervisor(MySupervisor)
 
@@ -134,6 +134,7 @@ Now in tests:
 
 ```elixir
 test "async operations are deterministic" do
+  import Supertester.Assertions
   {:ok, server} = MyServer.start_link()
 
   GenServer.cast(server, :async_operation)
@@ -320,7 +321,7 @@ assert_genserver_state(server, %{count: 5})
 
 ### After Tutorial
 1. Read [API_GUIDE.md](API_GUIDE.md) for complete reference
-2. Review examples in `test/supertester/` directory
+2. Review the example app in [examples/echo_lab](../examples/echo_lab/README.md)
 3. Try chaos and performance testing on your code
 4. Join the community and contribute!
 
@@ -370,8 +371,8 @@ Module implementations are well-documented - great learning resource!
 ## 📖 Full Documentation
 
 - **API Reference**: [API_GUIDE.md](API_GUIDE.md)
-- **Technical Design**: [technical-design-enhancement-20251007.md](technical-design-enhancement-20251007.md)
-- **Release Notes**: [RELEASE_0.2.0_SUMMARY.md](RELEASE_0.2.0_SUMMARY.md)
+- **Documentation Index**: [DOCS_INDEX.md](DOCS_INDEX.md)
+- **Release Notes**: [../CHANGELOG.md](../CHANGELOG.md)
 - **Main README**: [../README.md](../README.md)
 
 ---

@@ -201,11 +201,9 @@ defmodule Supertester.PerformanceHelpers do
     sampling_interval = Keyword.get(opts, :sampling_interval, 10)
 
     # Start monitoring task
-    parent = self()
-
     monitor_task =
       Task.async(fn ->
-        monitor_mailbox(server, parent, [initial_size], sampling_interval)
+        monitor_mailbox(server, [initial_size], sampling_interval)
       end)
 
     # Run operation
@@ -343,15 +341,20 @@ defmodule Supertester.PerformanceHelpers do
     end
   end
 
-  defp monitor_mailbox(server, parent, samples, interval) do
+  defp monitor_mailbox(server, samples, interval) do
     receive do
       :stop ->
-        send(parent, {:samples, samples})
         samples
     after
       interval ->
-        {:message_queue_len, size} = Process.info(server, :message_queue_len)
-        monitor_mailbox(server, parent, [size | samples], interval)
+        case Process.info(server, :message_queue_len) do
+          {:message_queue_len, size} ->
+            monitor_mailbox(server, [size | samples], interval)
+
+          nil ->
+            # Process died during monitoring
+            samples
+        end
     end
   end
 end

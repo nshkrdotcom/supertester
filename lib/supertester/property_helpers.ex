@@ -3,7 +3,6 @@ defmodule Supertester.PropertyHelpers do
   StreamData generators tailored for Supertester's concurrent harness.
   """
 
-  alias StreamData
   alias Supertester.ConcurrentHarness
 
   @doc """

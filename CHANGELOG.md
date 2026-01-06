@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-01-06
+
+### Added
+- EchoLab example app demonstrating full Supertester coverage under `examples/`.
+
+### Changed
+- Documentation reorganized under `guides/` and refreshed for 0.5.0 coverage.
+
+### Fixed
+- `setup_isolated_supervisor/3` now passes init args correctly when starting supervisors.
+- GenServer helper name resolution now supports `{:global, _}` and `{:via, _, _}` registrations.
+- Mailbox monitoring handles process exits during sampling and avoids redundant messaging.
+- Telemetry buffering avoids Agent startup races under concurrency.
+- GenServer state assertions now support scalar expected values.
+- Supervisor strategy assertion documentation clarified to reflect public API limits.
+
+### Removed
+- `get_supervisor_strategy/1` (unfinished API) has been dropped.
+- Legacy release summary documentation has been removed.
+
 ## [0.4.0] - 2025-12-26
 
 ### Added
@@ -111,8 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proper handling of supervisor event tracing
 
 ### Documentation
-- Added comprehensive technical design document (docs/technical-design-enhancement-20251007.md)
-- Added implementation status tracking (docs/implementation-status-final.md)
+- Added comprehensive technical design documentation.
+- Added implementation status tracking documentation.
 - Enhanced README.md with advanced usage examples for all new modules
 - Added chaos engineering, performance testing, and supervision tree examples
 
@@ -145,7 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
-[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.5.0
 [0.4.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.4.0
 [0.3.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.1
 [0.3.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.0

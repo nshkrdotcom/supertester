@@ -89,19 +89,25 @@ defmodule Supertester.PerformanceHelpersTest do
       end)
     end
 
-    # Flaky due to GC timing
-    @tag :skip
     test "detects memory growth trend" do
-      # This test creates a memory leak intentionally
-      # Note: Skipped due to timing variability with GC
       {:ok, agent} = Agent.start_link(fn -> [] end)
+
+      on_exit(fn ->
+        if Process.alive?(agent) do
+          try do
+            Agent.stop(agent)
+          catch
+            :exit, _ -> :ok
+          end
+        end
+      end)
 
       assert_raise RuntimeError, ~r/Memory leak detected/, fn ->
         assert_no_memory_leak(
-          100,
+          60,
           fn ->
             # Intentionally leak memory with larger chunks
-            Agent.update(agent, fn list -> [String.duplicate("x", 50_000) | list] end)
+            Agent.update(agent, fn list -> [:binary.copy(<<0>>, 500_000) | list] end)
           end,
           # Very tight threshold to catch leak
           threshold: 0.02
@@ -196,27 +202,28 @@ defmodule Supertester.PerformanceHelpersTest do
       )
     end
 
-    # Flaky due to timing - monitoring might not catch growth
-    @tag :skip
     test "raises when mailbox grows too large" do
-      {:ok, worker} = FastWorker.start_link()
+      pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      on_exit(fn ->
+        send(pid, :stop)
+      end)
 
       assert_raise RuntimeError, ~r/Mailbox size exceeded/, fn ->
-        assert_mailbox_stable(worker,
+        assert_mailbox_stable(pid,
           during: fn ->
             # Send many casts rapidly to build up mailbox
             for _ <- 1..200 do
-              # Use send instead of cast for speed
-              send(worker, {:ignored, :message})
-            end
-
-            # Small delay to let monitoring catch the growth
-            receive do
-            after
-              20 -> :ok
+              send(pid, {:ignored, :message})
             end
           end,
-          max_size: 50
+          max_size: 50,
+          sampling_interval: 1
         )
       end
     end

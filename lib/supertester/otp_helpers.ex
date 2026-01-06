@@ -89,13 +89,15 @@ defmodule Supertester.OTPHelpers do
   def setup_isolated_supervisor(module, test_name \\ "", opts \\ []) do
     unique_name = generate_unique_process_name(module, test_name)
 
+    {init_args, base_opts} = Keyword.pop(opts, :init_args, [])
+
     supervisor_opts =
-      case Keyword.get(opts, :name) do
-        nil -> Keyword.put(opts, :name, unique_name)
-        _existing_name -> opts
+      case Keyword.get(base_opts, :name) do
+        nil -> Keyword.put(base_opts, :name, unique_name)
+        _existing_name -> base_opts
       end
 
-    case safe_start(:supervisor, module, opts, supervisor_opts) do
+    case safe_start(:supervisor, module, init_args, supervisor_opts) do
       {:ok, pid} ->
         track_process(%{pid: pid, name: Keyword.get(supervisor_opts, :name), module: module})
         cleanup_on_exit(fn -> stop_supervisor_safely(pid) end)

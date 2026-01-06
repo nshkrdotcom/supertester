@@ -20,16 +20,4 @@ defmodule Supertester.Env do
   defp impl do
     Application.get_env(:supertester, :env_module, Supertester.Env.ExUnit)
   end
-
-  defmodule ExUnit do
-    @moduledoc false
-    @behaviour Supertester.Env
-
-    # Use Elixir. prefix to reference the actual ExUnit module,
-    # not the nested Supertester.Env.ExUnit module
-    @impl true
-    def on_exit(callback) when is_function(callback, 0) do
-      Elixir.ExUnit.Callbacks.on_exit(callback)
-    end
-  end
 end
