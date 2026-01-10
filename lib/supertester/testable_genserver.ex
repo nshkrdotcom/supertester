@@ -36,17 +36,6 @@ defmodule Supertester.TestableGenServer do
   @doc false
   defmacro __using__(_opts) do
     quote do
-      @doc """
-      Supertester synchronization handler.
-
-      This handler is injected by `use Supertester.TestableGenServer` and allows
-      tests to synchronize with this GenServer without using `Process.sleep/1`.
-
-      ## Messages
-
-      - `:__supertester_sync__` - Returns `:ok`
-      - `{:__supertester_sync__, return_state: true}` - Returns `{:ok, state}`
-      """
       @before_compile Supertester.TestableGenServer
     end
   end
@@ -61,6 +50,7 @@ defmodule Supertester.TestableGenServer do
         defoverridable handle_call: 3
       end
 
+      @doc false
       defp __supertester_sync_reply__(opts, state) do
         if Keyword.get(opts, :return_state, false) do
           {:reply, {:ok, state}, state}
@@ -69,16 +59,19 @@ defmodule Supertester.TestableGenServer do
         end
       end
 
+      @doc false
       def handle_call(:__supertester_sync__, _from, state) do
         __supertester_sync_reply__([], state)
       end
 
+      @doc false
       def handle_call({:__supertester_sync__, opts}, _from, state) do
         __supertester_sync_reply__(opts, state)
       end
 
       if has_handle_call? do
         # Delegate to original handle_call for other messages.
+        @doc false
         def handle_call(msg, from, state) do
           super(msg, from, state)
         end

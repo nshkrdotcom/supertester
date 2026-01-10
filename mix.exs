@@ -1,7 +1,7 @@
 defmodule Supertester.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.5.1"
   @source_url "https://github.com/nshkrdotcom/supertester"
 
   def project do
@@ -9,6 +9,7 @@ defmodule Supertester.MixProject do
       app: :supertester,
       version: @version,
       elixir: "~> 1.14",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
@@ -51,6 +52,9 @@ defmodule Supertester.MixProject do
     ]
   end
 
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
   defp aliases do
     [
       "test.all": ["test --include integration"],
@@ -70,37 +74,14 @@ defmodule Supertester.MixProject do
     [
       name: "supertester",
       description: description(),
-      files:
-        ~w(lib assets guides .formatter.exs mix.exs README.md LICENSE CHANGELOG.md) ++
-          ~w(
-            examples/README.md
-            examples/echo_lab/README.md
-            examples/echo_lab/mix.exs
-            examples/echo_lab/.formatter.exs
-            examples/echo_lab/.gitignore
-            examples/echo_lab/config
-            examples/echo_lab/lib
-            examples/echo_lab/test
-          ),
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
         "Online documentation" => "https://hexdocs.pm/supertester",
         "Changelog" => "#{@source_url}/blob/master/CHANGELOG.md"
       },
-      maintainers: ["nshkrdotcom"],
-      exclude_patterns: [
-        "priv/plts",
-        ".DS_Store",
-        "examples/**/_build",
-        "examples/**/deps",
-        "examples/**/mix.lock",
-        "examples/**/.elixir_ls",
-        "examples/**/.hex",
-        "examples/**/.mix",
-        "examples/**/.rebar3",
-        "examples/**/erl_crash.dump"
-      ]
+      maintainers: ["nshkrdotcom"]
     ]
   end
 

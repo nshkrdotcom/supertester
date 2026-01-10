@@ -1,5 +1,5 @@
 # Supertester Quick Start Guide
-**Version**: 0.5.0
+**Version**: 0.5.1
 
 Get up and running with Supertester in 5 minutes!
 
@@ -12,7 +12,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.5.0", only: :test}
+    {:supertester, "~> 0.5.1", only: :test}
   ]
 end
 ```

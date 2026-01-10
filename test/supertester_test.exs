@@ -5,6 +5,6 @@ defmodule SupertesterTest do
   test "version/0 returns the version" do
     version = Supertester.version()
     assert is_binary(version)
-    assert version == "0.5.0"
+    assert version == "0.5.1"
   end
 end

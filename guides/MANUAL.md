@@ -1,6 +1,6 @@
 # Supertester User Manual
 
-**Version**: 0.5.0
+**Version**: 0.5.1
 
 Welcome to the comprehensive user manual for Supertester. This document provides a detailed overview of all modules and functions available in the Supertester toolkit.
 
@@ -80,7 +80,7 @@ To get started with Supertester, add it as a dependency in your `mix.exs` file. 
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.5.0", only: :test}
+    {:supertester, "~> 0.5.1", only: :test}
   ]
 end
 ```
@@ -103,7 +103,7 @@ Returns the current version of the Supertester library.
 *   **Example:**
     ```elixir
     Supertester.version()
-    #=> "0.5.0"
+    #=> "0.5.1"
     ```
 
 ### `Supertester.ExUnitFoundation`

@@ -13,7 +13,7 @@
 
 **A battle-hardened OTP testing toolkit with chaos engineering, performance testing, and zero-sleep synchronization for building robust Elixir applications.**
 
-**Version 0.5.0** - Reliability fixes and tighter isolation across helpers, telemetry, and concurrency.
+**Version 0.5.1** - Eliminates the private @doc warning in TestableGenServer shims.
 
 ---
 
@@ -53,7 +53,7 @@ Add `supertester` as a dependency in your `mix.exs` file. It's only needed for t
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.5.0", only: :test}
+    {:supertester, "~> 0.5.1", only: :test}
   ]
 end
 ```
@@ -306,14 +306,9 @@ If you want a full Mix app that demonstrates every Supertester module, start her
 - [Examples Index](examples/README.md)
 - [EchoLab Example App](examples/echo_lab/README.md)
 
-## What's New in 0.5.0
+## What's New in 0.5.1
 
-- **Supervisor/OTP setup fixes**: Isolated supervisors now pass init args correctly.
-- **Name resolution improvements**: GenServer helpers support `{:global, _}` and `{:via, _, _}`.
-- **Telemetry robustness**: Buffering avoids Agent startup races under load.
-- **Mailbox monitoring stability**: Handles process exits cleanly during sampling.
-- **Assertions/doc clarity**: Scalar GenServer state expectations supported; supervisor strategy docs clarified.
-- **Removed**: `get_supervisor_strategy/1` (unfinished API) has been dropped.
+- **TestableGenServer warning fix**: clears stale `@doc` attributes before defining the private sync helper.
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
 

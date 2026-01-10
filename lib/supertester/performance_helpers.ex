@@ -218,12 +218,7 @@ defmodule Supertester.PerformanceHelpers do
     all_samples = samples ++ [final_size]
     max_size = Enum.max(all_samples)
 
-    avg_size =
-      if length(all_samples) > 0 do
-        Enum.sum(all_samples) / length(all_samples)
-      else
-        0
-      end
+    avg_size = Enum.sum(all_samples) / length(all_samples)
 
     %{
       initial_size: initial_size,

@@ -123,7 +123,7 @@ defmodule Supertester.SupervisorHelpersTest do
 
       # Should have restart events (which include starts)
       restart_events = Enum.filter(events, &match?({:child_restarted, _, _, _}, &1))
-      assert length(restart_events) >= 1
+      assert restart_events != []
     end
 
     test "traces child termination and restart events" do
@@ -142,11 +142,11 @@ defmodule Supertester.SupervisorHelpersTest do
 
       # Should have termination event
       term_events = Enum.filter(events, &match?({:child_terminated, _, _, _}, &1))
-      assert length(term_events) >= 1
+      assert term_events != []
 
       # Should have restart event
       restart_events = Enum.filter(events, &match?({:child_restarted, _, _, _}, &1))
-      assert length(restart_events) >= 1
+      assert restart_events != []
     end
   end
 

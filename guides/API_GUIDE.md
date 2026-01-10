@@ -1,5 +1,5 @@
 # Supertester API Guide
-**Version**: 0.5.0
+**Version**: 0.5.1
 **Last Updated**: January 6, 2026
 
 Reference guide for the primary Supertester modules and workflows.
@@ -30,7 +30,7 @@ Main module providing version information.
 
 ```elixir
 Supertester.version()
-# => "0.5.0"
+# => "0.5.1"
 ```
 
 ### Supertester.ExUnitFoundation
@@ -1338,6 +1338,6 @@ end
 
 ---
 
-**Version**: 0.5.0
+**Version**: 0.5.1
 **License**: MIT
 **Maintainer**: nshkrdotcom

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-01-09
+
+### Fixed
+- `Supertester.TestableGenServer` no longer emits a private `@doc` warning when used without `GenServer`.
+
 ## [0.5.0] - 2026-01-06
 
 ### Added
@@ -165,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
-[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.5.1
 [0.5.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.5.0
 [0.4.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.4.0
 [0.3.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.3.1
