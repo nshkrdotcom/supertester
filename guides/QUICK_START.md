@@ -53,6 +53,8 @@ assert_raise ArgumentError, fn ->
 end
 ```
 
+If your server handles the sync call but returns an error tuple (for example `{:error, :unknown_call}`), that still counts as synchronization and `cast_and_sync/4` returns `{:ok, reply}`.
+
 **Run**: `mix test`
 **Result**: Fast, reliable, parallel test ✅
 
@@ -123,7 +125,7 @@ test "one_for_one restarts only failed child" do
 end
 ```
 
-`test_restart_strategy/3` validates the expected strategy and raises if it does not match the runtime supervisor strategy.
+`test_restart_strategy/3` validates the expected strategy and raises if it does not match the runtime supervisor strategy (or if the scenario references unknown child IDs).
 
 **Run**: `mix test`
 **Result**: Supervision strategy verified ✅
@@ -379,6 +381,9 @@ Add `use Supertester.TestableGenServer` (or use `strict?: true` to raise immedia
 
 ### Supervisor tests failing?
 → Use `wait_for_supervisor_stabilization` after causing failures
+
+### `cast_and_sync/4` returned `{:ok, {:error, :unknown_call}}`?
+→ Synchronization succeeded; your server replied with an error tuple for the sync call. Add a dedicated sync handler (for example `use Supertester.TestableGenServer`) if you want `:ok`.
 
 ### Chaos tests too aggressive?
 → Reduce `kill_rate`/`duration_ms`, or set `kill_rate: 0.0` for a no-kill baseline.

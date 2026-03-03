@@ -45,4 +45,49 @@ defmodule Supertester.AtomSafetyTest do
 
     assert after_count - before < 5
   end
+
+  test "buffered telemetry isolation does not allocate one atom per process" do
+    original_env = Application.get_env(:supertester, :env_module)
+
+    on_exit(fn ->
+      if original_env do
+        Application.put_env(:supertester, :env_module, original_env)
+      else
+        Application.delete_env(:supertester, :env_module)
+      end
+    end)
+
+    Application.put_env(:supertester, :env_module, NoopEnv)
+
+    event = [:supertester, :atom_safety, :buffered_telemetry]
+
+    run_buffered_telemetry_batch(event, 20)
+    before = :erlang.system_info(:atom_count)
+    run_buffered_telemetry_batch(event, 20)
+
+    after_count = :erlang.system_info(:atom_count)
+    assert after_count - before < 8
+  end
+
+  defp run_buffered_telemetry_batch(event, count) do
+    1..count
+    |> Enum.map(fn _ ->
+      Task.async(fn -> buffered_capture_count(event) end)
+    end)
+    |> Enum.each(fn task ->
+      assert Task.await(task, 1_000) == 1
+    end)
+  end
+
+  defp buffered_capture_count(event) do
+    {:ok, _test_id} = Supertester.TelemetryHelpers.setup_telemetry_isolation()
+
+    {_result, captured} =
+      Supertester.TelemetryHelpers.with_telemetry(event, fn ->
+        Supertester.TelemetryHelpers.emit_with_context(event, %{count: 1}, %{})
+        :ok
+      end)
+
+    length(captured)
+  end
 end

@@ -100,6 +100,28 @@ defmodule Supertester.ChaosHelpersTest do
     end
   end
 
+  defmodule FragileSupervisor do
+    use Supervisor
+
+    def start_link(opts) do
+      Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
+    end
+
+    @impl true
+    def init(_opts) do
+      children = [
+        %{
+          id: :fragile_worker,
+          start:
+            {ResilientWorker, :start_link,
+             [[name: :"fragile_worker_#{:erlang.unique_integer([:positive])}"]]}
+        }
+      ]
+
+      Supervisor.init(children, strategy: :one_for_one, max_restarts: 0, max_seconds: 5)
+    end
+  end
+
   defmodule DynamicTemporaryWorker do
     use GenServer
 
@@ -316,6 +338,21 @@ defmodule Supertester.ChaosHelpersTest do
       assert report.killed == 0
       assert report.restarted == 0
       assert report.supervisor_crashed == false
+    end
+
+    test "returns a report when the supervisor crashes during chaos" do
+      previous_trap_exit = Process.flag(:trap_exit, true)
+      on_exit(fn -> Process.flag(:trap_exit, previous_trap_exit) end)
+
+      {:ok, supervisor} =
+        FragileSupervisor.start_link(name: :"fragile_sup_#{:erlang.unique_integer([:positive])}")
+
+      report =
+        chaos_kill_children(supervisor, kill_rate: 1.0, duration_ms: 80, kill_interval_ms: 20)
+
+      assert report.killed >= 1
+      assert report.supervisor_crashed == true
+      refute Process.alive?(supervisor)
     end
   end
 

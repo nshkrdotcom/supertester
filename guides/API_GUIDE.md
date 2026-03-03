@@ -551,6 +551,8 @@ Sends a cast and synchronizes to ensure processing.
 
 Use `strict?: true` to fail fast when the target server does not implement the sync handler.
 In non-strict mode, missing handlers return `{:error, :missing_sync_handler}`.
+If the sync call is handled and returns a reply (including `{:error, ...}` tuples), the result is
+`{:ok, reply}`.
 
 **Example**:
 ```elixir
@@ -565,7 +567,7 @@ assert_raise ArgumentError, fn ->
 end
 ```
 
-#### concurrent_calls/3
+#### concurrent_calls/4
 
 Stress-tests GenServer with concurrent calls.
 
@@ -653,6 +655,7 @@ Tests supervisor restart strategies.
 - `{:kill_children, [child_id]}`
 
 Raises `ArgumentError` when the expected strategy does not match the runtime strategy.
+Raises `ArgumentError` when a scenario references unknown child IDs.
 Supports supervisors with tuple-based or map-based internal state shapes.
 
 **Example**:
@@ -805,6 +808,8 @@ Randomly kills children in supervision tree.
 
 `kill_rate: 0.0` is a valid no-kill baseline.
 The `supervisor` argument can be a pid or a registered name.
+If the supervisor crashes during chaos, the helper returns a report with
+`supervisor_crashed: true` instead of exiting the caller.
 
 **Example**:
 ```elixir
@@ -857,7 +862,7 @@ test "system handles process pressure" do
 end
 ```
 
-#### assert_chaos_resilient/3
+#### assert_chaos_resilient/4
 
 Asserts system recovers from chaos.
 
@@ -962,7 +967,7 @@ assert_expectations(measurement, max_time_ms: 50)
 assert measurement.result == :ok
 ```
 
-#### assert_no_memory_leak/2
+#### assert_no_memory_leak/3
 
 Detects memory leaks over many iterations.
 
@@ -1488,6 +1493,9 @@ end
 
 ### Q: `cast_and_sync/4` returned `{:error, :missing_sync_handler}`
 **A**: The target server is missing a sync handler. Add `use Supertester.TestableGenServer`, or run with `strict?: true` and implement the handler explicitly.
+
+### Q: `cast_and_sync/4` returned `{:ok, {:error, :unknown_call}}`
+**A**: Synchronization succeeded, but your server replied with an error tuple for the sync call. Add an explicit sync handler if you want `:ok`.
 
 ### Q: Name conflicts in tests
 **A**: Use `setup_isolated_genserver` which generates unique isolated names.

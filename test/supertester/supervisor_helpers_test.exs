@@ -123,6 +123,22 @@ defmodule Supertester.SupervisorHelpersTest do
       end
     end
 
+    test "raises when kill_child scenario references an unknown child ID" do
+      {:ok, supervisor} = TestSupervisor.start_link(strategy: :one_for_one, children: 2)
+
+      assert_raise ArgumentError, ~r/child .* not found/, fn ->
+        test_restart_strategy(supervisor, :one_for_one, {:kill_child, :missing_worker})
+      end
+    end
+
+    test "raises when kill_children scenario contains an unknown child ID" do
+      {:ok, supervisor} = TestSupervisor.start_link(strategy: :one_for_one, children: 2)
+
+      assert_raise ArgumentError, ~r/child .* not found/, fn ->
+        test_restart_strategy(supervisor, :one_for_one, {:kill_children, [:worker_1, :missing]})
+      end
+    end
+
     test "supports supervisors whose internal state is a map" do
       {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 

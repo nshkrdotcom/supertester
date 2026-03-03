@@ -79,11 +79,18 @@ defmodule Supertester.GenServerHelpersTest do
     refute Process.alive?(server)
   end
 
-  test "cast_and_sync non-strict mode does not report success for unknown sync replies", %{
+  test "cast_and_sync non-strict mode accepts explicit sync replies", %{
     unknown_call: server
   } do
-    assert {:error, :missing_sync_handler} =
+    assert {:ok, {:error, :unknown_call}} =
              cast_and_sync(server, :ping, :__supertester_sync__, strict?: false)
+
+    assert Process.alive?(server)
+  end
+
+  test "cast_and_sync strict mode accepts explicit sync replies", %{unknown_call: server} do
+    assert {:ok, {:error, :unknown_call}} =
+             cast_and_sync(server, :ping, :__supertester_sync__, strict?: true)
 
     assert Process.alive?(server)
   end

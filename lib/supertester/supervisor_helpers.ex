@@ -91,16 +91,19 @@ defmodule Supertester.SupervisorHelpers do
     case scenario do
       {:kill_child, child_id} ->
         kill_child(supervisor, child_id)
+        |> assert_kill_result!(child_id)
 
       {:kill_children, child_ids} ->
         Enum.each(child_ids, fn child_id ->
           kill_child(supervisor, child_id)
+          |> assert_kill_result!(child_id)
         end)
 
       {:cascade_failure, start_child_id} ->
         # Cascade behavior is determined by the supervisor's strategy
         # (one_for_all, rest_for_one) - we just trigger it by killing
         kill_child(supervisor, start_child_id)
+        |> assert_kill_result!(start_child_id)
     end
 
     # Wait for supervisor to stabilize
@@ -373,6 +376,12 @@ defmodule Supertester.SupervisorHelpers do
       _ ->
         {:error, :child_not_found}
     end
+  end
+
+  defp assert_kill_result!(:ok, _child_id), do: :ok
+
+  defp assert_kill_result!({:error, :child_not_found}, child_id) do
+    raise ArgumentError, "Supervisor child #{inspect(child_id)} not found"
   end
 
   defp resolve_supervisor_pid(pid) when is_pid(pid), do: pid

@@ -317,7 +317,7 @@ Fetches the state of a `GenServer` without crashing if the process is down.
 Sends a `cast` message and then waits for a follow-up `call` to confirm the cast was processed. This is the recommended way to test async operations.
 
 *   **Signature:** `@spec cast_and_sync(GenServer.server(), term(), term(), keyword()) :: :ok | {:ok, term()} | {:error, term()}`
-*   **Options:** `:strict?` (default `false`) raises when the target server doesn't implement the sync handler; `:timeout` customizes the sync call timeout. In non-strict mode, missing sync handlers return `{:error, :missing_sync_handler}`.
+*   **Options:** `:strict?` (default `false`) raises when the target server doesn't implement the sync handler; `:timeout` customizes the sync call timeout. In non-strict mode, missing sync handlers return `{:error, :missing_sync_handler}`. If the sync call is handled and replies with any value (including `{:error, ...}` tuples), the result is `{:ok, reply}`.
 *   **Example:**
     ```elixir
     :ok = cast_and_sync(counter_pid, :increment)
@@ -371,6 +371,7 @@ This module provides helpers for testing supervision trees and restart strategie
 
 Tests a supervisor's restart strategy (`:one_for_one`, `:one_for_all`, etc.) with a given failure scenario.
 If `strategy` does not match the runtime supervisor strategy, the function raises.
+If the scenario references child IDs that are not present, the function raises `ArgumentError`.
 This strategy introspection supports both tuple-based and map-based supervisor internals
 (including `DynamicSupervisor` states).
 
@@ -462,6 +463,8 @@ Randomly kills children in a supervision tree to test restart strategies and sys
 This helper accepts supervisor pids and registered names (`:local`, `{:global, _}`, `{:via, _, _}`).
 The `restarted` metric is measured from observed child replacements and may be lower than `killed`
 (for example, with temporary children).
+If the supervisor crashes during chaos, the helper returns a report with `supervisor_crashed: true`
+instead of exiting the caller.
 
 *   **Signature:** `@spec chaos_kill_children(Supervisor.supervisor(), keyword()) :: chaos_report()`
 *   **Options:** `:kill_rate`, `:duration_ms`, `:kill_interval_ms`
@@ -790,7 +793,7 @@ This module provides a set of custom, OTP-aware assertions.
 *   `assert_supervisor_strategy(supervisor, expected_strategy)`
 *   `assert_child_count(supervisor, expected_count)`
 *   `assert_all_children_alive(supervisor)`
-*   `assert_no_process_leaks(operation_fun)` (tracks processes spawned/linked by the operation caller, including descendant spawn trees)
+*   `assert_no_process_leaks(operation_fun)` (tracks processes spawned/linked by the operation caller, including delayed descendant spawn trees)
 *   `assert_memory_usage_stable(operation_fun, tolerance)`
 *   `assert_performance_within_bounds(benchmark_result, expectations)`
 
@@ -910,6 +913,7 @@ end
 
 *   **Flaky Tests:** If your tests are still flaky, ensure every asynchronous operation is followed by a synchronization helper like `cast_and_sync`.
 *   **`{:error, :missing_sync_handler}` from `cast_and_sync`:** The target server is missing a sync handler. Add `use Supertester.TestableGenServer` (or use `strict?: true` and fix the missing sync handler).
+*   **`{:ok, {:error, :unknown_call}}` from `cast_and_sync`:** Synchronization succeeded, but your server replied with an error tuple for the sync call. Add an explicit sync handler if you want `:ok`.
 *   **Name Conflicts:** If you encounter name clashes, make sure you are using `setup_isolated_genserver` for all your processes.
 *   **Supervisor Tests Failing:** After inducing failures in a supervisor test, always use `wait_for_supervisor_stabilization` before making assertions about its children.
 *   **Inconsistent Performance Tests:** Run `:erlang.garbage_collect()` before measuring performance and use a sufficient number of iterations to get stable results.

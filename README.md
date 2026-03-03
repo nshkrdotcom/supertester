@@ -99,10 +99,11 @@ end
 ## Behavior Notes
 
 - `cast_and_sync/4` with `strict?: true` raises on missing sync handler.
-- In non-strict mode, missing sync handlers return `{:error, :missing_sync_handler}` (never `:ok`).
-- `test_restart_strategy/3` validates expected strategy and raises on mismatch (including map-based supervisor states such as `DynamicSupervisor`).
+- In non-strict mode, missing sync handlers return `{:error, :missing_sync_handler}` (never `:ok`), while explicit sync replies are returned as `{:ok, reply}`.
+- `test_restart_strategy/3` validates expected strategy and raises on mismatch or unknown scenario child IDs.
 - `assert_supervision_tree_structure/2` validates `:supervisor`, `:strategy`, and expected child modules.
 - `chaos_kill_children/2` accepts supervisor pids or registered names (`:local`, `{:global, _}`, `{:via, _, _}`).
+- `chaos_kill_children/2` returns a report even when the target supervisor crashes during the chaos loop.
 - `run_chaos_suite/3` enforces a suite-wide timeout (`:timeout` / `:suite_timeout` failure reasons).
 
 ## Reliability and Safety Improvements
@@ -111,9 +112,10 @@ Recent hardening changes include:
 
 - Atom-safe isolation and helper naming (no unbounded dynamic atom creation for test identifiers/process naming paths).
 - ETS table injection fallback no longer creates dynamic atoms at runtime.
+- Telemetry buffering avoids per-process dynamic atom creation.
 - More accurate chaos restart accounting (`restarted` is observed from child replacements, including duplicate-ID child sets).
 - `simulate_resource_exhaustion/2` treats non-positive `:spawn_count` / `:count` as an explicit no-op.
-- Stronger leak detection focused on processes spawned or linked by the operation under test, including descendant spawn trees.
+- Stronger leak detection focused on processes spawned or linked by the operation under test, including delayed descendant spawn trees.
 
 ## Documentation
 

@@ -337,29 +337,36 @@ defmodule Supertester.TelemetryHelpers do
   end
 
   defp buffer_event(parent, message) do
-    buffer_name = :"supertester_telemetry_buffer_#{:erlang.phash2(parent)}"
+    buffer_name = telemetry_buffer_name(parent)
 
-    case Agent.start_link(fn -> [] end, name: buffer_name) do
-      {:ok, _} ->
-        Agent.update(buffer_name, &[message | &1])
+    case Agent.start(fn -> [] end, name: buffer_name) do
+      {:ok, _pid} ->
+        :ok
 
-      {:error, {:already_started, _}} ->
-        Agent.update(buffer_name, &[message | &1])
+      {:error, {:already_started, _pid}} ->
+        :ok
     end
+
+    Agent.update(buffer_name, &[message | &1])
   end
 
   defp flush_buffer do
-    buffer_name = :"supertester_telemetry_buffer_#{:erlang.phash2(self())}"
+    buffer_id = {:supertester_telemetry_buffer, self()}
+    buffer_name = telemetry_buffer_name(self())
 
-    case Process.whereis(buffer_name) do
-      nil ->
+    case :global.whereis_name(buffer_id) do
+      :undefined ->
         []
 
       pid ->
         events = Agent.get(pid, &Enum.reverse/1)
-        Agent.stop(pid)
+        Agent.stop(buffer_name)
         events
     end
+  end
+
+  defp telemetry_buffer_name(parent_pid) when is_pid(parent_pid) do
+    {:global, {:supertester_telemetry_buffer, parent_pid}}
   end
 
   defp receive_matching_telemetry(event_pattern, metadata_pattern, test_id, timeout) do

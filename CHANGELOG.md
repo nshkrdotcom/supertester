@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.0] - 2026-03-02
 
 ### Changed
+- `GenServerHelpers.cast_and_sync/4` now treats any successful sync call reply as synchronized (including replies like `{:error, :unknown_call}`) and returns `{:ok, reply}`. Missing handlers still return `{:error, :missing_sync_handler}` in non-strict mode and raise in strict mode.
+- `SupervisorHelpers.test_restart_strategy/3` now raises `ArgumentError` when scenario child IDs are missing instead of silently returning a no-op restart report.
+- `Assertions.assert_no_process_leaks/1` now keeps spawn tracing active for a short post-operation grace window, improving detection of delayed descendant leaks.
 - README and guides refreshed for current 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, and expanded helper coverage), including corrected chaos, supervisor, and leak-detection semantics.
 - `GenServerHelpers.cast_and_sync/4` now consistently returns `{:error, :missing_sync_handler}` in non-strict mode whenever sync handling is missing (instead of returning `:ok` on alive targets).
 - `SupervisorHelpers.assert_supervision_tree_structure/2` now validates expected child modules for leaf children, not only child IDs.
@@ -18,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ETSIsolation.inject_table/3-4` fallback path now rejects dynamic atom creation and requires a safe/pre-existing env key or `__supertester_set_table__/2`.
 
 ### Fixed
+- `ChaosHelpers.chaos_kill_children/2` no longer exits the caller when the supervisor dies mid-loop; it now returns a report with `supervisor_crashed: true`.
+- `TelemetryHelpers` buffered event capture no longer creates per-process dynamic atoms for buffer naming.
 - Isolation and helper naming paths no longer rely on unbounded dynamic atom creation (`test_id` is string-based; shared registry/process naming are atom-safe).
 - `GenServerHelpers.cast_and_sync/4` now returns `{:error, :missing_sync_handler}` in non-strict mode when sync probing reveals a missing handler via process exit.
 - `SupervisorHelpers.test_restart_strategy/3` and `assert_supervision_tree_structure/2` now enforce expected strategy/module checks more strictly, including map-based supervisor internals (`DynamicSupervisor`).
@@ -28,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately, traces spawned descendant trees, and reports persistent leaks with lower false-positive noise.
 - Updated version assertion test to `0.6.0`.
 - Refactored `GenServerHelpers.concurrent_calls/4` internals to satisfy strict Credo nesting limits without behavior changes.
+
+### Documentation
+- Updated `README.md`, `guides/QUICK_START.md`, `guides/MANUAL.md`, `guides/API_GUIDE.md`, and `guides/DOCS_INDEX.md` for current cast/sync semantics, stricter supervisor scenario validation, chaos crash handling, leak-detection behavior, atom-safety notes, and corrected arity headings.
 
 ## [0.5.1] - 2026-01-09
 
@@ -125,17 +133,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `get_active_child_count/1` - Get active child count
 - **Supertester.ChaosHelpers** - Chaos engineering for OTP resilience testing
   - `inject_crash/3` - Controlled crash injection (immediate, delayed, random)
-  - `chaos_kill_children/3` - Random child killing in supervision trees
+  - `chaos_kill_children/2` - Random child killing in supervision trees
   - `simulate_resource_exhaustion/2` - Process/ETS/memory limit simulation
-  - `assert_chaos_resilient/3` - Verify system recovery from chaos
+  - `assert_chaos_resilient/4` - Verify system recovery from chaos
   - `run_chaos_suite/3` - Comprehensive chaos scenario testing
 - **Supertester.PerformanceHelpers** - Performance testing and regression detection
   - `assert_performance/2` - Assert time/memory/reduction bounds
-  - `assert_no_memory_leak/2` - Detect memory leaks over iterations
+  - `assert_no_memory_leak/3` - Detect memory leaks over iterations
   - `measure_operation/1` - Measure time, memory, and CPU work
   - `measure_mailbox_growth/2` - Monitor mailbox growth
   - `assert_mailbox_stable/2` - Ensure mailbox doesn't grow unbounded
-  - `compare_performance/2` - Compare multiple function performances
+  - `compare_performance/1` - Compare multiple function performances
 
 ### Changed
 - **BREAKING**: Eliminated all `Process.sleep/1` calls in production code

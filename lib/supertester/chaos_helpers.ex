@@ -438,12 +438,7 @@ defmodule Supertester.ChaosHelpers do
       stats
     else
       # Get current children
-      children =
-        try do
-          Supervisor.which_children(supervisor)
-        rescue
-          _ -> []
-        end
+      children = safe_supervisor_children(supervisor)
 
       # Kill random children based on kill_rate.
       {killed_count, killed_children} = kill_random_children(children, kill_rate, kill_reason)
@@ -496,12 +491,7 @@ defmodule Supertester.ChaosHelpers do
   defp count_restarted_children(_supervisor, _initial_children, []), do: 0
 
   defp count_restarted_children(supervisor, initial_children, killed_children) do
-    current_children =
-      try do
-        Supervisor.which_children(supervisor)
-      rescue
-        _ -> []
-      end
+    current_children = safe_supervisor_children(supervisor)
 
     initial_by_id = group_child_pids_by_id(initial_children)
     current_by_id = group_child_pids_by_id(current_children)
@@ -642,6 +632,14 @@ defmodule Supertester.ChaosHelpers do
   defp remaining_timeout_ms(suite_start, timeout_ms) when is_integer(timeout_ms) do
     elapsed = System.monotonic_time(:millisecond) - suite_start
     max(timeout_ms - elapsed, 0)
+  end
+
+  defp safe_supervisor_children(supervisor) do
+    Supervisor.which_children(supervisor)
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
   end
 
   defp resolve_supervisor_pid(pid) when is_pid(pid), do: pid

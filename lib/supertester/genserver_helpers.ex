@@ -120,9 +120,6 @@ defmodule Supertester.GenServerHelpers do
         :ok ->
           :ok
 
-        {:error, :unknown_call} ->
-          handle_missing_sync(strict?, server, sync_message)
-
         response ->
           {:ok, response}
       end

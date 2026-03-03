@@ -388,6 +388,7 @@ defmodule Supertester.Assertions do
 
   @strategies [:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one]
   @type pid_set :: %{optional(pid()) => true}
+  @spawn_trace_grace_ms 50
 
   defp extract_supervisor_strategy(supervisor) do
     state = :sys.get_state(supervisor)
@@ -420,6 +421,7 @@ defmodule Supertester.Assertions do
     try do
       operation_fun.()
     after
+      wait_for_spawn_trace_grace()
       :erlang.trace(tracer, false, [:procs, :set_on_spawn])
     end
 
@@ -428,6 +430,13 @@ defmodule Supertester.Assertions do
 
     {spawned, _traced_after_disable} = drain_spawn_trace_messages(spawned, traced)
     pid_set_to_list(spawned)
+  end
+
+  defp wait_for_spawn_trace_grace do
+    receive do
+    after
+      @spawn_trace_grace_ms -> :ok
+    end
   end
 
   @spec drain_spawn_trace_messages(pid_set(), pid_set()) :: {pid_set(), pid_set()}
