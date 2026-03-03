@@ -219,7 +219,8 @@ defmodule Supertester.ChaosHelpers do
     # Create ETS tables
     tables =
       for i <- 1..count do
-        :ets.new(:"chaos_table_#{i}_#{:erlang.unique_integer([:positive])}", [:set, :public])
+        _ = i
+        :ets.new(:supertester_chaos_table, [:set, :public])
       end
 
     cleanup_fn = fn ->
@@ -372,13 +373,19 @@ defmodule Supertester.ChaosHelpers do
       assert report.failed == 0
   """
   @spec run_chaos_suite(pid(), [map()], keyword()) :: chaos_suite_report()
-  def run_chaos_suite(target, scenarios, _opts \\ []) do
+  def run_chaos_suite(target, scenarios, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, :infinity)
     start_time = System.monotonic_time(:millisecond)
 
-    results =
-      Enum.map(scenarios, fn scenario ->
-        execute_chaos_scenario(target, scenario)
+    {completed_results, remaining_scenarios} =
+      run_chaos_scenarios(target, scenarios, start_time, timeout, [])
+
+    timeout_results =
+      Enum.map(remaining_scenarios, fn scenario ->
+        {:error, {scenario, :suite_timeout}}
       end)
+
+    results = completed_results ++ timeout_results
 
     passed = Enum.count(results, fn {status, _} -> status == :ok end)
     failed = Enum.count(results, fn {status, _} -> status == :error end)
@@ -417,19 +424,21 @@ defmodule Supertester.ChaosHelpers do
           _ -> []
         end
 
-      # Kill random children based on kill_rate
-      {killed_count, restarted_count} = kill_random_children(children, kill_rate, kill_reason)
+      # Kill random children based on kill_rate.
+      {killed_count, killed_children} = kill_random_children(children, kill_rate, kill_reason)
+
+      # Wait before next iteration to allow restart processing.
+      receive do
+      after
+        kill_interval_ms -> :ok
+      end
+
+      restarted_count = count_restarted_children(supervisor, killed_children)
 
       new_stats = %{
         killed: stats.killed + killed_count,
         restarted: stats.restarted + restarted_count
       }
-
-      # Wait before next iteration
-      receive do
-      after
-        kill_interval_ms -> :ok
-      end
 
       # Continue loop
       chaos_loop(supervisor, kill_rate, kill_interval_ms, kill_reason, end_time, new_stats)
@@ -445,19 +454,43 @@ defmodule Supertester.ChaosHelpers do
       |> Enum.shuffle()
       |> Enum.take(kill_count)
 
-    killed =
-      Enum.count(to_kill, fn {_id, pid, _type, _mods} ->
+    {killed, killed_children} =
+      Enum.reduce(to_kill, {0, []}, fn {id, pid, _type, _mods}, {count, acc} ->
         if is_pid(pid) and Process.alive?(pid) do
           Process.exit(pid, kill_reason)
-          true
+          {count + 1, [{id, pid} | acc]}
         else
-          false
+          {count, acc}
         end
       end)
 
-    # Count how many were restarted (simplified - just return killed count)
-    {killed, killed}
+    {killed, Enum.reverse(killed_children)}
   end
+
+  defp count_restarted_children(_supervisor, []), do: 0
+
+  defp count_restarted_children(supervisor, killed_children) do
+    current_children =
+      try do
+        Supervisor.which_children(supervisor)
+      rescue
+        _ -> []
+      end
+
+    Enum.count(killed_children, &child_restarted?(&1, current_children))
+  end
+
+  defp child_restarted?({id, old_pid}, current_children) do
+    current_children
+    |> Enum.find(fn {child_id, _pid, _type, _mods} -> child_id == id end)
+    |> restarted_child?(id, old_pid)
+  end
+
+  defp restarted_child?({id, new_pid, _type, _mods}, id, old_pid) when is_pid(new_pid) do
+    new_pid != old_pid and Process.alive?(new_pid)
+  end
+
+  defp restarted_child?(_, _id, _old_pid), do: false
 
   defp wait_for_recovery(recovery_fn, start_time, timeout) do
     current_time = System.monotonic_time(:millisecond)
@@ -520,4 +553,53 @@ defmodule Supertester.ChaosHelpers do
   end
 
   defp build_harness_input(_target, _scenario), do: {:error, :missing_concurrent_scenario}
+
+  defp run_chaos_scenarios(_target, [], _suite_start, _timeout, acc) do
+    {Enum.reverse(acc), []}
+  end
+
+  defp run_chaos_scenarios(target, [scenario | rest], suite_start, timeout, acc) do
+    case remaining_timeout_ms(suite_start, timeout) do
+      remaining when is_integer(remaining) and remaining <= 0 ->
+        {Enum.reverse(acc), [scenario | rest]}
+
+      :infinity ->
+        result = execute_chaos_scenario(target, scenario)
+        run_chaos_scenarios(target, rest, suite_start, timeout, [result | acc])
+
+      remaining ->
+        result = execute_chaos_scenario_with_timeout(target, scenario, remaining)
+
+        case result do
+          {:error, {^scenario, :timeout}} ->
+            {Enum.reverse([result | acc]), rest}
+
+          _ ->
+            run_chaos_scenarios(target, rest, suite_start, timeout, [result | acc])
+        end
+    end
+  end
+
+  defp execute_chaos_scenario_with_timeout(target, scenario, timeout_ms)
+       when is_integer(timeout_ms) and timeout_ms > 0 do
+    task = Task.async(fn -> execute_chaos_scenario(target, scenario) end)
+
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        {:error, {scenario, reason}}
+
+      nil ->
+        {:error, {scenario, :timeout}}
+    end
+  end
+
+  defp remaining_timeout_ms(_suite_start, :infinity), do: :infinity
+
+  defp remaining_timeout_ms(suite_start, timeout_ms) when is_integer(timeout_ms) do
+    elapsed = System.monotonic_time(:millisecond) - suite_start
+    max(timeout_ms - elapsed, 0)
+  end
 end

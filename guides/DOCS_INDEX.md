@@ -1,5 +1,7 @@
 # Supertester Documentation Index
 
+Last reviewed: March 2, 2026
+
 This folder contains the user-facing guides and reference material published with the library.
 
 ## Start Here

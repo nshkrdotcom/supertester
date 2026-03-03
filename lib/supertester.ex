@@ -1,9 +1,10 @@
 defmodule Supertester do
   @moduledoc """
-  Supertester - Multi-repository test orchestration and execution framework.
+  Supertester is an OTP-focused testing toolkit for Elixir applications.
 
-  Provides centralized test management, execution, and reporting across
-  multiple Elixir repositories in a monorepo structure.
+  It provides deterministic synchronization helpers, process/supervisor isolation,
+  chaos and performance utilities, and OTP-aware assertions for testing concurrent
+  systems without timing hacks.
 
   ## Core Modules
 

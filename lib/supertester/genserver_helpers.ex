@@ -456,11 +456,15 @@ defmodule Supertester.GenServerHelpers do
   end
 
   defp handle_missing_sync(false, server, sync_message) do
-    Logger.debug(fn ->
-      "GenServer #{inspect(server)} ignored sync message #{inspect(sync_message)}; assuming cast completed"
-    end)
+    if server_alive?(server) do
+      Logger.debug(fn ->
+        "GenServer #{inspect(server)} ignored sync message #{inspect(sync_message)}; assuming cast completed"
+      end)
 
-    :ok
+      :ok
+    else
+      {:error, :missing_sync_handler}
+    end
   end
 
   defp missing_sync_exit?(%RuntimeError{message: message}, sync_message) do
@@ -474,6 +478,31 @@ defmodule Supertester.GenServerHelpers do
   defp missing_sync_exit?(_, _), do: false
 
   defp contains_sync_message?(message, _sync_message) do
-    String.contains?(message, "handle_call")
+    String.contains?(message, "no handle_call/3 clause was provided")
   end
+
+  defp server_alive?(pid) when is_pid(pid), do: Process.alive?(pid)
+
+  defp server_alive?(name) when is_atom(name) do
+    case Process.whereis(name) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end
+  end
+
+  defp server_alive?({:global, name}) do
+    case :global.whereis_name(name) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end
+  end
+
+  defp server_alive?({:via, module, name}) do
+    case module.whereis_name(name) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end
+  end
+
+  defp server_alive?(_), do: false
 end

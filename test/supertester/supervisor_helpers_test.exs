@@ -103,6 +103,14 @@ defmodule Supertester.SupervisorHelpersTest do
       # All PIDs should be different
       refute Enum.any?(initial_pids, fn pid -> pid in new_pids end)
     end
+
+    test "raises when expected strategy does not match the supervisor strategy" do
+      {:ok, supervisor} = TestSupervisor.start_link(strategy: :one_for_one, children: 2)
+
+      assert_raise ArgumentError, ~r/strategy mismatch/, fn ->
+        test_restart_strategy(supervisor, :one_for_all, {:kill_child, :worker_1})
+      end
+    end
   end
 
   describe "trace_supervision_events/2" do
@@ -177,6 +185,35 @@ defmodule Supertester.SupervisorHelpersTest do
             {:worker_2, Worker},
             # This doesn't exist
             {:worker_3, Worker}
+          ]
+        })
+      end
+    end
+
+    test "raises when expected strategy does not match" do
+      {:ok, supervisor} = TestSupervisor.start_link(strategy: :one_for_one, children: 2)
+
+      assert_raise RuntimeError, ~r/Expected supervisor strategy/, fn ->
+        assert_supervision_tree_structure(supervisor, %{
+          supervisor: TestSupervisor,
+          strategy: :one_for_all,
+          children: [
+            {:worker_1, Worker},
+            {:worker_2, Worker}
+          ]
+        })
+      end
+    end
+
+    test "raises when expected supervisor module does not match" do
+      {:ok, supervisor} = TestSupervisor.start_link(strategy: :one_for_one, children: 1)
+
+      assert_raise RuntimeError, ~r/Expected supervisor module/, fn ->
+        assert_supervision_tree_structure(supervisor, %{
+          supervisor: __MODULE__,
+          strategy: :one_for_one,
+          children: [
+            {:worker_1, Worker}
           ]
         })
       end

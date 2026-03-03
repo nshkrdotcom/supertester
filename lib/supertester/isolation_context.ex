@@ -3,11 +3,11 @@ defmodule Supertester.IsolationContext do
   Normalized representation of all resources and metadata tracked for a test.
   """
 
-  @type process_info :: %{pid: pid(), name: atom() | nil, module: module()}
+  @type process_info :: %{pid: pid(), name: term() | nil, module: module()}
 
   @type t :: %__MODULE__{
           test_id: term(),
-          registry: atom() | nil,
+          registry: term() | nil,
           processes: [process_info()],
           ets_tables: [term()],
           cleanup_callbacks: [(-> any())],

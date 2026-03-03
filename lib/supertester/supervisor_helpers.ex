@@ -74,7 +74,9 @@ defmodule Supertester.SupervisorHelpers do
   """
   @spec test_restart_strategy(Supervisor.supervisor(), atom(), restart_scenario()) ::
           test_result()
-  def test_restart_strategy(supervisor, _strategy, scenario) do
+  def test_restart_strategy(supervisor, expected_strategy, scenario) do
+    validate_supervisor_strategy!(supervisor, expected_strategy)
+
     supervisor_pid = resolve_supervisor_pid(supervisor)
 
     # Get initial state
@@ -211,6 +213,9 @@ defmodule Supertester.SupervisorHelpers do
   """
   @spec assert_supervision_tree_structure(Supervisor.supervisor(), tree_structure()) :: :ok
   def assert_supervision_tree_structure(supervisor, expected) do
+    maybe_assert_expected_supervisor_module(supervisor, expected)
+    maybe_assert_expected_supervisor_strategy(supervisor, expected)
+
     children = Supervisor.which_children(supervisor)
 
     # Check child count
@@ -372,4 +377,100 @@ defmodule Supertester.SupervisorHelpers do
   end
 
   defp resolve_supervisor_pid(_), do: nil
+
+  @strategies [:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one]
+
+  defp validate_supervisor_strategy!(supervisor, expected_strategy) do
+    actual_strategy = extract_supervisor_strategy(supervisor)
+
+    cond do
+      actual_strategy == nil ->
+        raise ArgumentError,
+              "Unable to determine supervisor strategy for #{inspect(supervisor)}"
+
+      actual_strategy != expected_strategy ->
+        raise ArgumentError,
+              "Supervisor strategy mismatch: expected #{inspect(expected_strategy)}, got #{inspect(actual_strategy)}"
+
+      true ->
+        :ok
+    end
+  end
+
+  defp maybe_assert_expected_supervisor_module(supervisor, expected) do
+    case Map.get(expected, :supervisor) do
+      nil ->
+        :ok
+
+      expected_module ->
+        actual_module = extract_supervisor_module(supervisor)
+
+        if actual_module != nil and actual_module != expected_module do
+          raise "Expected supervisor module #{inspect(expected_module)}, got #{inspect(actual_module)}"
+        end
+    end
+  end
+
+  defp maybe_assert_expected_supervisor_strategy(supervisor, expected) do
+    case Map.get(expected, :strategy) do
+      nil ->
+        :ok
+
+      expected_strategy ->
+        actual_strategy = extract_supervisor_strategy(supervisor)
+
+        if actual_strategy == nil do
+          raise "Unable to determine supervisor strategy for #{inspect(supervisor)}"
+        end
+
+        if actual_strategy != expected_strategy do
+          raise "Expected supervisor strategy #{inspect(expected_strategy)}, got #{inspect(actual_strategy)}"
+        end
+    end
+  end
+
+  defp extract_supervisor_strategy(supervisor) do
+    supervisor
+    |> fetch_supervisor_state()
+    |> do_extract_supervisor_strategy()
+  end
+
+  defp do_extract_supervisor_strategy({:state, _name, strategy, _rest})
+       when strategy in @strategies,
+       do: strategy
+
+  defp do_extract_supervisor_strategy(tuple) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.find(fn value -> value in @strategies end)
+  end
+
+  defp do_extract_supervisor_strategy(_), do: nil
+
+  defp extract_supervisor_module(supervisor) do
+    supervisor
+    |> fetch_supervisor_state()
+    |> do_extract_supervisor_module()
+  end
+
+  defp do_extract_supervisor_module({:state, {_pid, module}, _strategy, _rest})
+       when is_atom(module),
+       do: module
+
+  defp do_extract_supervisor_module(tuple) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.find_value(&module_from_term/1)
+  end
+
+  defp do_extract_supervisor_module(_), do: nil
+
+  defp module_from_term({pid, module}) when is_pid(pid) and is_atom(module), do: module
+  defp module_from_term(_), do: nil
+
+  defp fetch_supervisor_state(supervisor) do
+    :sys.get_state(supervisor)
+  catch
+    :exit, _ -> nil
+  end
 end

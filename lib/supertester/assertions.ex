@@ -188,29 +188,33 @@ defmodule Supertester.Assertions do
   @doc """
   Asserts that a supervisor is accessible and running.
 
-  Note: This function verifies the supervisor is alive and responding to
-  queries but does not validate the actual restart strategy. Strategy
-  verification requires access to supervisor internals that are not
-  exposed through the public API.
+  This function validates the runtime supervisor strategy by inspecting the
+  supervisor state through OTP system introspection APIs.
 
   ## Parameters
 
   - `supervisor` - The supervisor pid or name
-  - `_expected_strategy` - Currently unused (reserved for future implementation)
+  - `expected_strategy` - The expected strategy (:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one)
 
   ## Example
 
       assert_supervisor_strategy(supervisor, :one_for_one)
   """
   @spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
-  def assert_supervisor_strategy(supervisor, _expected_strategy) do
-    # Verify supervisor is accessible by querying it
-    _ = Supervisor.which_children(supervisor)
-    _ = Supervisor.count_children(supervisor)
-    :ok
+  def assert_supervisor_strategy(supervisor, expected_strategy) do
+    case extract_supervisor_strategy(supervisor) do
+      nil ->
+        raise "Unable to determine supervisor strategy for #{inspect(supervisor)}"
+
+      ^expected_strategy ->
+        :ok
+
+      actual ->
+        raise "Expected supervisor strategy #{inspect(expected_strategy)}, got #{inspect(actual)}"
+    end
   catch
     :exit, reason ->
-      raise "Failed to access supervisor: #{inspect(reason)}"
+      raise "Failed to inspect supervisor strategy: #{inspect(reason)}"
   end
 
   @doc """
@@ -334,27 +338,16 @@ defmodule Supertester.Assertions do
     final_processes = Process.list()
     leaked_processes = final_processes -- initial_processes
 
-    # Filter out test-related processes that are expected
+    # Ignore transient processes that disappear quickly, but keep persistent leaks.
     actual_leaks =
       Enum.filter(leaked_processes, fn pid ->
-        case Process.info(pid, [:initial_call, :dictionary]) do
-          nil ->
-            false
-
-          info ->
-            initial_call = Keyword.get(info, :initial_call, {})
-            dictionary = Keyword.get(info, :dictionary, [])
-
-            # Filter out known test infrastructure processes
-            not (tuple_starts_with?(initial_call, [:proc_lib, :init_p]) or
-                   Keyword.has_key?(dictionary, :"$ancestors"))
-        end
+        Process.alive?(pid) and persistent_process?(pid, 20) and reportable_process?(pid)
       end)
 
     if Enum.empty?(actual_leaks) do
       :ok
     else
-      raise "Process leaks detected: #{length(actual_leaks)} processes were not cleaned up"
+      raise "Process leaks detected: #{length(actual_leaks)} processes were not cleaned up (#{inspect(actual_leaks)})"
     end
   end
 
@@ -392,13 +385,43 @@ defmodule Supertester.Assertions do
 
   # Private functions
 
-  defp tuple_starts_with?(tuple, prefixes) when is_tuple(tuple) do
-    tuple_list = Tuple.to_list(tuple)
+  @strategies [:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one]
 
-    Enum.any?(prefixes, fn prefix ->
-      List.starts_with?(tuple_list, List.wrap(prefix))
-    end)
+  defp extract_supervisor_strategy(supervisor) do
+    state = :sys.get_state(supervisor)
+
+    case state do
+      tuple when is_tuple(tuple) ->
+        tuple
+        |> Tuple.to_list()
+        |> Enum.find(fn value -> value in @strategies end)
+
+      _ ->
+        nil
+    end
   end
 
-  defp tuple_starts_with?(_, _), do: false
+  defp persistent_process?(pid, wait_ms) do
+    if Process.alive?(pid) do
+      receive do
+      after
+        wait_ms -> :ok
+      end
+
+      Process.alive?(pid)
+    else
+      false
+    end
+  end
+
+  defp reportable_process?(pid) do
+    case Process.info(pid, [:initial_call]) do
+      nil ->
+        false
+
+      info ->
+        initial_call = Keyword.get(info, :initial_call, nil)
+        is_tuple(initial_call)
+    end
+  end
 end

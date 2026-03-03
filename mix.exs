@@ -1,7 +1,7 @@
 defmodule Supertester.MixProject do
   use Mix.Project
 
-  @version "0.5.1"
+  @version "0.6.0"
   @source_url "https://github.com/nshkrdotcom/supertester"
 
   def project do
@@ -46,7 +46,7 @@ defmodule Supertester.MixProject do
       {:stream_data, "~> 1.0"},
       {:telemetry, "~> 1.0"},
       {:benchee, "~> 1.3", only: :test, runtime: false},
-      {:ex_doc, "~> 0.27", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false}
     ]

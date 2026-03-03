@@ -1,5 +1,6 @@
 # Supertester Quick Start Guide
-**Version**: 0.5.1
+**Version**: 0.6.0
+**Last Updated**: March 2, 2026
 
 Get up and running with Supertester in 5 minutes!
 
@@ -12,7 +13,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.5.1", only: :test}
+    {:supertester, "~> 0.6.0", only: :test}
   ]
 end
 ```
@@ -41,6 +42,14 @@ defmodule MyApp.CounterTest do
 
     assert_genserver_state(counter, fn s -> s.count == 2 end)
   end
+end
+```
+
+If your server does not implement the sync handler, use strict mode to fail fast:
+
+```elixir
+assert_raise ArgumentError, fn ->
+  cast_and_sync(counter, :increment, :__supertester_sync__, strict?: true)
 end
 ```
 
@@ -111,6 +120,8 @@ test "one_for_one restarts only failed child" do
   assert :worker_2 in result.not_restarted
 end
 ```
+
+`test_restart_strategy/3` validates the expected strategy and raises if it does not match the runtime supervisor strategy.
 
 **Run**: `mix test`
 **Result**: Supervision strategy verified ✅
@@ -357,8 +368,11 @@ Module implementations are well-documented - great learning resource!
 ### Tests still flaky?
 → Make sure you're using `cast_and_sync` instead of `cast` + sleep
 
+### `{:error, :missing_sync_handler}` from `cast_and_sync/4`?
+→ Add `use Supertester.TestableGenServer` to the target server (or run with `strict?: true` to raise immediately).
+
 ### Name conflicts?
-→ Use `setup_isolated_genserver` which generates unique names
+→ Use `setup_isolated_genserver` which generates unique isolated names.
 
 ### Supervisor tests failing?
 → Use `wait_for_supervisor_stabilization` after causing failures

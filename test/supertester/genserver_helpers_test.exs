@@ -56,6 +56,13 @@ defmodule Supertester.GenServerHelpersTest do
     end
   end
 
+  test "cast_and_sync does not report success when sync handler is missing", %{no_sync: server} do
+    assert {:error, :missing_sync_handler} =
+             cast_and_sync(server, :ping, :__supertester_sync__, strict?: false)
+
+    refute Process.alive?(server)
+  end
+
   test "concurrent_calls returns structured successes and errors" do
     # Use separate servers for each call type to avoid GenServer serialization issues.
     # This tests the harness correctly aggregates successes and errors.

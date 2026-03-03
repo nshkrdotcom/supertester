@@ -66,6 +66,40 @@ defmodule Supertester.ChaosHelpersTest do
     end
   end
 
+  defmodule TemporaryWorker do
+    use GenServer
+
+    def start_link(opts) do
+      GenServer.start_link(__MODULE__, :ok, opts)
+    end
+
+    @impl true
+    def init(:ok), do: {:ok, :ok}
+  end
+
+  defmodule TemporaryWorkerSupervisor do
+    use Supervisor
+
+    def start_link(opts) do
+      Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
+    end
+
+    @impl true
+    def init(_opts) do
+      children = [
+        %{
+          id: :temporary_worker,
+          start:
+            {TemporaryWorker, :start_link,
+             [[name: :"temporary_worker_#{:erlang.unique_integer([:positive])}"]]},
+          restart: :temporary
+        }
+      ]
+
+      Supervisor.init(children, strategy: :one_for_one)
+    end
+  end
+
   describe "inject_crash/3" do
     test "injects a single crash into a process" do
       # Trap exits so we don't crash when worker crashes
@@ -191,6 +225,20 @@ defmodule Supertester.ChaosHelpersTest do
       assert is_integer(report.killed)
       assert is_integer(report.restarted)
       assert is_boolean(report.supervisor_crashed)
+    end
+
+    test "reports zero restarts for temporary children" do
+      {:ok, supervisor} =
+        TemporaryWorkerSupervisor.start_link(
+          name: :"temp_sup_#{:erlang.unique_integer([:positive])}"
+        )
+
+      report =
+        chaos_kill_children(supervisor, kill_rate: 1.0, duration_ms: 60, kill_interval_ms: 20)
+
+      assert report.killed >= 1
+      assert report.restarted == 0
+      assert Supervisor.which_children(supervisor) == []
     end
   end
 
@@ -381,6 +429,30 @@ defmodule Supertester.ChaosHelpersTest do
 
       # ensure harness operations actually ran
       assert GenServer.call(worker, :get_work_count) > 0
+    end
+
+    test "respects overall timeout and does not run the full suite" do
+      {:ok, supervisor} =
+        ResilientSupervisor.start_link(
+          workers: 1,
+          name: :"timeout_sup_#{:erlang.unique_integer([:positive])}"
+        )
+
+      scenarios = [
+        %{type: :kill_children, kill_rate: 1.0, duration_ms: 200, kill_interval_ms: 50},
+        %{type: :kill_children, kill_rate: 1.0, duration_ms: 200, kill_interval_ms: 50}
+      ]
+
+      start_ms = System.monotonic_time(:millisecond)
+      report = run_chaos_suite(supervisor, scenarios, timeout: 120)
+      elapsed_ms = System.monotonic_time(:millisecond) - start_ms
+
+      assert elapsed_ms < 300
+      assert report.failed >= 1
+
+      assert Enum.any?(report.failures, fn %{reason: reason} ->
+               reason in [:timeout, :suite_timeout]
+             end)
     end
   end
 end

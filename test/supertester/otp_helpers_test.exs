@@ -47,22 +47,24 @@ defmodule Supertester.OTPHelpersTest do
 
   test "setup_isolated_genserver derives deterministic names and tracks processes", context do
     {:ok, pid} = setup_isolated_genserver(NamedServer, "named_worker")
-    assert {:registered_name, name} = Process.info(pid, :registered_name)
+    isolation_context = Supertester.UnifiedTestFoundation.fetch_isolation_context()
 
-    name_string = Atom.to_string(name)
+    tracked =
+      Enum.find(isolation_context.processes, fn %{pid: tracked_pid} -> tracked_pid == pid end)
+
+    assert tracked
+    assert {:global, {:supertester, NamedServer, name_string, _serial}} = tracked.name
+    assert GenServer.whereis(tracked.name) == pid
+
     assert String.contains?(name_string, "NamedServer")
     assert String.contains?(name_string, "named_worker")
 
     sanitized_test_id =
       context.isolation_context.test_id
-      |> Atom.to_string()
+      |> to_string()
       |> String.replace(~r/[^a-zA-Z0-9]+/, "_")
 
     assert String.contains?(name_string, sanitized_test_id)
-
-    isolation_context = Supertester.UnifiedTestFoundation.fetch_isolation_context()
-
-    assert Enum.any?(isolation_context.processes, fn %{pid: tracked_pid} -> tracked_pid == pid end)
   end
 
   test "setup_isolated_genserver surfaces init errors with metadata" do

@@ -1,5 +1,6 @@
 defmodule Supertester.UnifiedTestFoundation do
   alias Supertester.{Env, IsolationContext}
+  @shared_registry_name :supertester_shared_registry
 
   @moduledoc """
   Isolation runtime for OTP-heavy tests.
@@ -182,15 +183,12 @@ defmodule Supertester.UnifiedTestFoundation do
   end
 
   defp setup_isolation_with_registry(context, isolation_type) do
-    {isolation_context, test_id} = build_isolation_context(context, isolation_type)
-    registry_name = :"test_registry_#{test_id}"
-
-    {:ok, _} = Registry.start_link(keys: :unique, name: registry_name)
+    {isolation_context, _test_id} = build_isolation_context(context, isolation_type)
+    ensure_shared_registry_started()
 
     isolation_context =
       isolation_context
-      |> Map.put(:registry, registry_name)
-      |> add_cleanup_callback(fn -> GenServer.stop(registry_name) end)
+      |> Map.put(:registry, @shared_registry_name)
 
     register_cleanup(isolation_context)
 
@@ -234,8 +232,8 @@ defmodule Supertester.UnifiedTestFoundation do
         _ -> "anonymous"
       end
 
-    timestamp = System.unique_integer([:positive])
-    String.to_atom("#{test_name}_#{timestamp}")
+    timestamp = System.unique_integer([:positive, :monotonic])
+    "#{test_name}_#{timestamp}"
   end
 
   defp cleanup_isolation(nil), do: :ok
@@ -275,6 +273,19 @@ defmodule Supertester.UnifiedTestFoundation do
     :ets.delete(table)
   rescue
     ArgumentError -> :ok
+  end
+
+  defp ensure_shared_registry_started do
+    case Process.whereis(@shared_registry_name) do
+      pid when is_pid(pid) ->
+        {:ok, pid}
+
+      nil ->
+        case Registry.start_link(keys: :unique, name: @shared_registry_name) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+        end
+    end
   end
 
   defp check_contamination(nil), do: :ok

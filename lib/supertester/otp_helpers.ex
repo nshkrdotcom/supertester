@@ -338,21 +338,32 @@ defmodule Supertester.OTPHelpers do
       |> normalize_segment()
 
     logical_segment = normalize_segment(test_name)
+    serial = System.unique_integer([:positive, :monotonic])
 
     case Supertester.UnifiedTestFoundation.fetch_isolation_context() do
       %Supertester.IsolationContext{test_id: test_id} ->
-        [module_segment, logical_segment, normalize_segment(test_id)]
-        |> Enum.reject(&is_nil/1)
-        |> Enum.join("_")
-        |> String.to_atom()
+        key =
+          [module_segment, logical_segment, normalize_segment(test_id)]
+          |> Enum.reject(&is_nil/1)
+          |> Enum.join("_")
+          |> case do
+            "" -> "supertester_process"
+            value -> value
+          end
+
+        {:global, {:supertester, module, key, serial}}
 
       _ ->
-        timestamp = System.unique_integer([:positive])
+        key =
+          [module_segment, logical_segment]
+          |> Enum.reject(&is_nil/1)
+          |> Enum.join("_")
+          |> case do
+            "" -> "supertester_process"
+            value -> value
+          end
 
-        [module_segment, logical_segment, Integer.to_string(timestamp)]
-        |> Enum.reject(&is_nil/1)
-        |> Enum.join("_")
-        |> String.to_atom()
+        {:global, {:supertester, module, key, serial}}
     end
   end
 

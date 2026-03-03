@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-02
+
+### Changed
+- README and guides refreshed for current 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, and expanded helper coverage).
+
+### Fixed
+- Isolation and helper naming paths no longer rely on unbounded dynamic atom creation (`test_id` is string-based; shared registry/process naming are atom-safe).
+- `GenServerHelpers.cast_and_sync/4` now returns `{:error, :missing_sync_handler}` in non-strict mode when sync probing reveals a missing handler via process exit.
+- `SupervisorHelpers.test_restart_strategy/3` and `assert_supervision_tree_structure/2` now enforce expected strategy/module checks more strictly.
+- `Assertions.assert_supervisor_strategy/2` now validates runtime supervisor strategy instead of only process accessibility.
+- `ChaosHelpers.chaos_kill_children/2` now reports observed child replacements for `restarted`, and `run_chaos_suite/3` now enforces suite-wide timeout semantics.
+- `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately and reports persistent leaks with lower false-positive noise.
+
 ## [0.5.1] - 2026-01-09
 
 ### Fixed
@@ -170,7 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.GenServerHelpers` - GenServer-specific test patterns
 - `Supertester.Assertions` - Custom OTP-aware assertions
 
-[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/supertester/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.6.0
 [0.5.1]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.5.1
 [0.5.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.5.0
 [0.4.0]: https://github.com/nshkrdotcom/supertester/releases/tag/v0.4.0

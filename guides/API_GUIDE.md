@@ -1,6 +1,6 @@
 # Supertester API Guide
-**Version**: 0.5.1
-**Last Updated**: January 6, 2026
+**Version**: 0.6.0
+**Last Updated**: March 2, 2026
 
 Reference guide for the primary Supertester modules and workflows.
 
@@ -30,7 +30,7 @@ Main module providing version information.
 
 ```elixir
 Supertester.version()
-# => "0.5.1"
+# => "0.6.0"
 ```
 
 ### Supertester.ExUnitFoundation
@@ -40,7 +40,7 @@ Drop-in ExUnit adapter that configures isolation automatically.
 #### Isolation Modes (`:isolation` option)
 
 - **`:basic`** – Basic isolation with unique naming (async-friendly)
-- **`:registry`** – Registry-based process isolation (async-friendly)
+- **`:registry`** – Registry-backed process isolation (async-friendly)
 - **`:full_isolation`** – Complete process and ETS isolation (recommended, async-friendly)
 - **`:contamination_detection`** – Isolation with leak detection (runs synchronously)
 
@@ -448,6 +448,60 @@ GenServer.stop(MyServer)
 assert new_pid != original_pid
 ```
 
+#### wait_for_supervisor_restart/2
+
+Waits for a supervisor tree to become ready.
+
+```elixir
+@spec wait_for_supervisor_restart(Supervisor.supervisor(), timeout()) ::
+        {:ok, pid()} | {:error, term()}
+```
+
+**Example**:
+```elixir
+{:ok, supervisor} = setup_isolated_supervisor(MySupervisor)
+{:ok, _pid} = wait_for_supervisor_restart(supervisor, 2_000)
+```
+
+#### monitor_process_lifecycle/1
+
+Returns a monitor reference for a process under test.
+
+```elixir
+@spec monitor_process_lifecycle(pid()) :: {reference(), pid()}
+```
+
+**Example**:
+```elixir
+{ref, pid} = monitor_process_lifecycle(server)
+assert is_reference(ref)
+assert is_pid(pid)
+```
+
+#### wait_for_process_death/2
+
+Waits for a process to terminate and returns the `:DOWN` reason.
+
+```elixir
+@spec wait_for_process_death(pid(), timeout()) :: {:ok, term()} | {:error, :timeout}
+```
+
+**Example**:
+```elixir
+Process.exit(server, :kill)
+{:ok, reason} = wait_for_process_death(server, 1_000)
+assert reason in [:killed, :kill]
+```
+
+#### cleanup_processes/1 and cleanup_on_exit/1
+
+Utility helpers for explicit teardown when you need custom lifecycle control.
+
+```elixir
+@spec cleanup_processes([pid()]) :: :ok
+@spec cleanup_on_exit((-> any())) :: :ok
+```
+
 ### Supertester.GenServerHelpers
 
 GenServer-specific testing patterns.
@@ -467,6 +521,21 @@ Safely retrieves GenServer state without crashing.
 assert state.counter == 5
 ```
 
+#### call_with_timeout/3
+
+Makes a safe call and wraps failures in `{:error, reason}`.
+
+```elixir
+@spec call_with_timeout(GenServer.server(), term(), timeout()) ::
+        {:ok, term()} | {:error, term()}
+```
+
+**Example**:
+```elixir
+{:ok, value} = call_with_timeout(server, :value, 500)
+assert is_integer(value)
+```
+
 #### cast_and_sync/4
 
 Sends a cast and synchronizes to ensure processing.
@@ -476,12 +545,21 @@ Sends a cast and synchronizes to ensure processing.
         :ok | {:ok, term()} | {:error, term()}
 ```
 
+Use `strict?: true` to fail fast when the target server does not implement the sync handler.
+In non-strict mode, missing handlers can return `{:error, :missing_sync_handler}` if the
+target dies while processing the sync probe.
+
 **Example**:
 ```elixir
 # No more Process.sleep!
 :ok = cast_and_sync(server, {:increment, 5})
 {:ok, state} = get_server_state_safely(server)
 assert state.counter == 5
+
+# Strict mode for deterministic handler enforcement
+assert_raise ArgumentError, fn ->
+  cast_and_sync(server, {:increment, 5}, :__supertester_sync__, strict?: true)
+end
 ```
 
 #### concurrent_calls/3
@@ -538,6 +616,20 @@ assert info.recovered == true
 assert info.new_pid != info.original_pid
 ```
 
+#### test_invalid_messages/2
+
+Sends intentionally invalid messages and reports server behavior for each case.
+
+```elixir
+@spec test_invalid_messages(GenServer.server(), [term()]) :: {:ok, [map()]}
+```
+
+**Example**:
+```elixir
+{:ok, results} = test_invalid_messages(server, [:bad_message, {:unknown, 1}])
+assert length(results) == 2
+```
+
 ### Supertester.SupervisorHelpers
 
 Supervision tree testing utilities.
@@ -557,6 +649,8 @@ Tests supervisor restart strategies.
 - `{:kill_child, child_id}`
 - `{:kill_children, [child_id]}`
 
+Raises `ArgumentError` when the expected strategy does not match the runtime strategy.
+
 **Example**:
 ```elixir
 result = test_restart_strategy(supervisor, :one_for_one, {:kill_child, :worker_1})
@@ -573,6 +667,8 @@ Verifies supervision tree matches expected structure.
 ```elixir
 @spec assert_supervision_tree_structure(Supervisor.supervisor(), tree_structure()) :: :ok
 ```
+
+When `expected` contains `:supervisor` and/or `:strategy`, both are validated.
 
 **Example**:
 ```elixir
@@ -639,6 +735,20 @@ end)
 assert_all_children_alive(supervisor)
 ```
 
+#### get_active_child_count/1
+
+Returns the currently active child count for a supervisor.
+
+```elixir
+@spec get_active_child_count(Supervisor.supervisor()) :: non_neg_integer()
+```
+
+**Example**:
+```elixir
+count = get_active_child_count(supervisor)
+assert count >= 0
+```
+
 ---
 
 ## Chaos Engineering
@@ -672,7 +782,7 @@ inject_crash(worker_pid, {:after_ms, 100})
 inject_crash(worker_pid, {:random, 0.3}, reason: :chaos_test)
 ```
 
-#### chaos_kill_children/3
+#### chaos_kill_children/2
 
 Randomly kills children in supervision tree.
 
@@ -697,6 +807,9 @@ report = chaos_kill_children(supervisor,
 assert report.killed > 0
 assert report.supervisor_crashed == false
 ```
+
+`report.restarted` reflects observed replacements and may be lower than `report.killed`
+(for example, with temporary children).
 
 #### simulate_resource_exhaustion/2
 
@@ -754,6 +867,9 @@ Runs comprehensive chaos scenario testing.
 ```elixir
 @spec run_chaos_suite(pid(), [map()], keyword()) :: chaos_suite_report()
 ```
+
+`opts[:timeout]` is a suite-wide deadline. Timed-out scenarios are reported as failures
+with `:timeout` / `:suite_timeout`.
 
 **Example**:
 Supports both legacy scenario maps and concurrent harness scenarios:
@@ -813,6 +929,7 @@ test "API meets performance SLA" do
     max_reductions: 100_000
   )
 end
+```
 
 #### assert_expectations/2
 
@@ -829,7 +946,6 @@ Useful when you need the measured result but still want to enforce limits:
 measurement = measure_operation(fn -> run_workload() end)
 assert_expectations(measurement, max_time_ms: 50)
 assert measurement.result == :ok
-```
 ```
 
 #### assert_no_memory_leak/2
@@ -931,7 +1047,7 @@ assert_mailbox_stable(server,
 )
 ```
 
-#### compare_performance/2
+#### compare_performance/1
 
 Compares performance of multiple functions.
 
@@ -1016,6 +1132,28 @@ end)
 @spec assert_genserver_responsive(GenServer.server()) :: :ok
 ```
 
+#### assert_genserver_handles_message/3
+
+```elixir
+@spec assert_genserver_handles_message(GenServer.server(), term(), term()) :: :ok
+```
+
+**Example**:
+```elixir
+assert_genserver_handles_message(server, :get_value, 10)
+```
+
+#### assert_supervisor_strategy/2
+
+```elixir
+@spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
+```
+
+**Example**:
+```elixir
+assert_supervisor_strategy(supervisor, :one_for_one)
+```
+
 #### assert_child_count/2
 
 ```elixir
@@ -1061,6 +1199,20 @@ assert_memory_usage_stable(fn ->
     GenServer.call(server, :operation)
   end
 end, 0.05)  # 5% tolerance
+```
+
+#### assert_performance_within_bounds/2
+
+Validates benchmark result maps produced by custom measurements.
+
+```elixir
+@spec assert_performance_within_bounds(map(), map()) :: :ok
+```
+
+**Example**:
+```elixir
+metrics = %{max_time: 50, max_memory: 200_000}
+assert_performance_within_bounds(metrics, %{max_time: 100, max_memory: 500_000})
 ```
 
 ---
@@ -1316,8 +1468,11 @@ end
 ### Q: Tests are still flaky
 **A**: Ensure you're using `cast_and_sync` instead of `GenServer.cast` + sleep
 
+### Q: `cast_and_sync/4` returned `{:error, :missing_sync_handler}`
+**A**: Add `use Supertester.TestableGenServer` to the target server, or run with `strict?: true` and implement the sync handler.
+
 ### Q: Name conflicts in tests
-**A**: Use `setup_isolated_genserver` which generates unique names
+**A**: Use `setup_isolated_genserver` which generates unique isolated names.
 
 ### Q: Supervisor tests fail
 **A**: Use `wait_for_supervisor_stabilization` after causing failures
@@ -1338,6 +1493,6 @@ end
 
 ---
 
-**Version**: 0.5.1
+**Version**: 0.6.0
 **License**: MIT
 **Maintainer**: nshkrdotcom

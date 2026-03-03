@@ -1,6 +1,7 @@
 # Supertester User Manual
 
-**Version**: 0.5.1
+**Version**: 0.6.0
+**Last Updated**: March 2, 2026
 
 Welcome to the comprehensive user manual for Supertester. This document provides a detailed overview of all modules and functions available in the Supertester toolkit.
 
@@ -63,7 +64,7 @@ Supertester provides robust test isolation, allowing you to run your tests concu
 
 ### Zero `Process.sleep`
 
-Timing-based synchronization (`Process.sleep/1`) is a common source of flaky tests. Supertester eliminates the need for this by providing deterministic synchronization patterns, such as `cast_and_sync/3`, which ensures that an asynchronous operation has completed before the test proceeds.
+Timing-based synchronization (`Process.sleep/1`) is a common source of flaky tests. Supertester replaces this with deterministic synchronization patterns such as `cast_and_sync/3`. For best guarantees, use `Supertester.TestableGenServer` (or `strict?: true`) so missing sync handlers fail immediately.
 
 ### Automatic Cleanup
 
@@ -80,7 +81,7 @@ To get started with Supertester, add it as a dependency in your `mix.exs` file. 
 ```elixir
 def deps do
   [
-    {:supertester, "~> 0.5.1", only: :test}
+    {:supertester, "~> 0.6.0", only: :test}
   ]
 end
 ```
@@ -103,7 +104,7 @@ Returns the current version of the Supertester library.
 *   **Example:**
     ```elixir
     Supertester.version()
-    #=> "0.5.1"
+    #=> "0.6.0"
     ```
 
 ### `Supertester.ExUnitFoundation`
@@ -126,7 +127,7 @@ end
 **Isolation Modes (`:isolation` option):**
 
 *   `:basic`: Provides basic isolation with unique process naming (async-friendly).
-*   `:registry`: Uses a dedicated registry for process isolation (async-friendly).
+*   `:registry`: Uses registry-backed process isolation (async-friendly).
 *   `:full_isolation`: Provides complete process and ETS table isolation. This is the recommended mode (async-friendly).
 *   `:contamination_detection`: Detects if a test leaks processes or ETS tables (runs synchronously).
 
@@ -175,7 +176,7 @@ defmodule CustomHarnessTest do
 end
 ```
 
-The value stored in `context.isolation_context` is a `%Supertester.IsolationContext{}` struct that captures the `test_id`, tracked processes, ETS tables, and contextual tags (module, test name, isolation mode, etc.), making it easy to log or inspect diagnostics.
+The value stored in `context.isolation_context` is a `%Supertester.IsolationContext{}` struct that captures the `test_id` (string), tracked processes, ETS tables, and contextual tags (module, test name, isolation mode, etc.), making it easy to log or inspect diagnostics.
 
 ### `Supertester.Env`
 
@@ -287,6 +288,16 @@ Waits for a supervised process to be terminated and restarted.
     {:ok, new_pid} = wait_for_process_restart(MyServer, original_pid)
     ```
 
+**Additional OTP lifecycle helpers**
+
+`Supertester.OTPHelpers` also provides:
+
+*   `wait_for_supervisor_restart/2`
+*   `monitor_process_lifecycle/1`
+*   `wait_for_process_death/2`
+*   `cleanup_processes/1`
+*   `cleanup_on_exit/1`
+
 ### `Supertester.GenServerHelpers`
 
 This module provides helpers specifically for testing `GenServer`s.
@@ -306,7 +317,7 @@ Fetches the state of a `GenServer` without crashing if the process is down.
 Sends a `cast` message and then waits for a follow-up `call` to confirm the cast was processed. This is the recommended way to test async operations.
 
 *   **Signature:** `@spec cast_and_sync(GenServer.server(), term(), term(), keyword()) :: :ok | {:ok, term()} | {:error, term()}`
-*   **Options:** `:strict?` (default `false`) raises when the target server doesn't implement the sync handler; `:timeout` to customize the sync call timeout.
+*   **Options:** `:strict?` (default `false`) raises when the target server doesn't implement the sync handler; `:timeout` customizes the sync call timeout. In non-strict mode, missing sync handlers can return `{:error, :missing_sync_handler}` if the server dies during sync probing.
 *   **Example:**
     ```elixir
     :ok = cast_and_sync(counter_pid, :increment)
@@ -344,6 +355,14 @@ Stress-tests a `GenServer` with many concurrent requests.
     end)
     ```
 
+**Additional GenServer helpers**
+
+`Supertester.GenServerHelpers` also includes:
+
+*   `call_with_timeout/3`
+*   `stress_test_server/4`
+*   `test_invalid_messages/2`
+
 ### `Supertester.SupervisorHelpers`
 
 This module provides helpers for testing supervision trees and restart strategies.
@@ -351,6 +370,7 @@ This module provides helpers for testing supervision trees and restart strategie
 **`test_restart_strategy(supervisor, strategy, scenario)`**
 
 Tests a supervisor's restart strategy (`:one_for_one`, `:one_for_all`, etc.) with a given failure scenario.
+If `strategy` does not match the runtime supervisor strategy, the function raises.
 
 *   **Signature:** `@spec test_restart_strategy(Supervisor.supervisor(), atom(), restart_scenario()) :: test_result()`
 *   **Example:**
@@ -362,7 +382,7 @@ Tests a supervisor's restart strategy (`:one_for_one`, `:one_for_all`, etc.) wit
 
 **`assert_supervision_tree_structure(supervisor, expected)`**
 
-Validates the structure of a supervision tree.
+Validates the structure of a supervision tree. When `expected` includes `:supervisor` and/or `:strategy`, those are validated too.
 
 *   **Signature:** `@spec assert_supervision_tree_structure(Supervisor.supervisor(), tree_structure()) :: :ok`
 *   **Example:**
@@ -402,6 +422,10 @@ Waits for a supervisor to have all its children running and stable, which is use
     assert_all_children_alive(supervisor)
     ```
 
+**Additional supervisor helper**
+
+*   `get_active_child_count/1` returns the active child count from `Supervisor.count_children/1`.
+
 ---
 
 ## Chaos Engineering
@@ -427,7 +451,7 @@ Injects a controlled crash into a process.
 
 **`chaos_kill_children(supervisor, opts \\ [])`**
 
-Randomly kills children in a supervision tree to test restart strategies and system resilience.
+Randomly kills children in a supervision tree to test restart strategies and system resilience. The `restarted` metric is measured from observed child replacements and may be lower than `killed` (for example, with temporary children).
 
 *   **Signature:** `@spec chaos_kill_children(Supervisor.supervisor(), keyword()) :: chaos_report()`
 *   **Options:** `:kill_rate`, `:duration_ms`, `:kill_interval_ms`
@@ -471,6 +495,7 @@ against the same target process or supervisor so you can orchestrate concurrent 
 injecting faults.
 
 *   **Signature:** `@spec run_chaos_suite(pid(), [map()], keyword()) :: chaos_suite_report()`
+*   **Timeout Behavior:** `opts[:timeout]` is enforced as a suite-wide deadline. Scenarios that do not finish in time are reported as failures with `:timeout` / `:suite_timeout`.
 *   **Concurrent Scenarios:** Provide `%{type: :concurrent, build: fn target -> scenario end}` or
     `%{type: :concurrent, scenario: <ConcurrentHarness scenario>}` entries to reuse the harness with
     shared telemetry/reporting.
@@ -746,10 +771,13 @@ This module provides a set of custom, OTP-aware assertions.
 *   `assert_process_restarted(process_name, original_pid)`
 *   `assert_genserver_state(server, expected_state_or_fun)`
 *   `assert_genserver_responsive(server)`
+*   `assert_genserver_handles_message(server, message, expected_response)`
+*   `assert_supervisor_strategy(supervisor, expected_strategy)`
 *   `assert_child_count(supervisor, expected_count)`
 *   `assert_all_children_alive(supervisor)`
 *   `assert_no_process_leaks(operation_fun)`
 *   `assert_memory_usage_stable(operation_fun, tolerance)`
+*   `assert_performance_within_bounds(benchmark_result, expectations)`
 
 **Example: `assert_genserver_state/2`**
 
@@ -858,13 +886,15 @@ end
 1.  **Always Use Isolation:** Start your test modules with `use Supertester.ExUnitFoundation, isolation: :full_isolation`.
 2.  **Prefer `setup_isolated_*`:** Use `setup_isolated_genserver` and `setup_isolated_supervisor` to ensure automatic cleanup and unique naming.
 3.  **Avoid `Process.sleep`:** Use `cast_and_sync` for asynchronous operations and `wait_for_*` helpers for other synchronization needs.
-4.  **Use Expressive Assertions:** Leverage the custom assertions in `Supertester.Assertions` to make your tests clearer and more concise.
-5.  **Test for Resilience:** Use the `ChaosHelpers` to inject faults and ensure your system can handle them gracefully.
-6.  **Assert Performance:** Use `PerformanceHelpers` to set performance SLAs and prevent regressions.
+4.  **Use Strict Sync Where Possible:** Prefer `strict?: true` in `cast_and_sync/4` when you control the target server and expect the sync handler to exist.
+5.  **Use Expressive Assertions:** Leverage the custom assertions in `Supertester.Assertions` to make your tests clearer and more concise.
+6.  **Test for Resilience:** Use the `ChaosHelpers` to inject faults and ensure your system can handle them gracefully.
+7.  **Assert Performance:** Use `PerformanceHelpers` to set performance SLAs and prevent regressions.
 
 ## Troubleshooting
 
 *   **Flaky Tests:** If your tests are still flaky, ensure every asynchronous operation is followed by a synchronization helper like `cast_and_sync`.
+*   **`{:error, :missing_sync_handler}` from `cast_and_sync`:** Add `use Supertester.TestableGenServer` to the target server (or use `strict?: true` and fix the missing sync handler).
 *   **Name Conflicts:** If you encounter name clashes, make sure you are using `setup_isolated_genserver` for all your processes.
 *   **Supervisor Tests Failing:** After inducing failures in a supervisor test, always use `wait_for_supervisor_stabilization` before making assertions about its children.
 *   **Inconsistent Performance Tests:** Run `:erlang.garbage_collect()` before measuring performance and use a sufficient number of iterations to get stable results.
