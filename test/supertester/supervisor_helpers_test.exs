@@ -122,6 +122,16 @@ defmodule Supertester.SupervisorHelpersTest do
         test_restart_strategy(supervisor, :one_for_all, {:kill_child, :worker_1})
       end
     end
+
+    test "supports supervisors whose internal state is a map" do
+      {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
+      result = test_restart_strategy(supervisor, :one_for_one, {:kill_children, []})
+
+      assert result.restarted == []
+      assert result.not_restarted == []
+      assert result.supervisor_alive
+    end
   end
 
   describe "trace_supervision_events/2" do
@@ -240,6 +250,18 @@ defmodule Supertester.SupervisorHelpersTest do
           children: [
             {:worker_1, OtherWorker}
           ]
+        })
+      end
+    end
+
+    test "raises when expected supervisor module does not match for map-based supervisor states" do
+      {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
+      assert_raise RuntimeError, ~r/Expected supervisor module/, fn ->
+        assert_supervision_tree_structure(supervisor, %{
+          supervisor: __MODULE__,
+          strategy: :one_for_one,
+          children: []
         })
       end
     end

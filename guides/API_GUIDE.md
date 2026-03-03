@@ -653,6 +653,7 @@ Tests supervisor restart strategies.
 - `{:kill_children, [child_id]}`
 
 Raises `ArgumentError` when the expected strategy does not match the runtime strategy.
+Supports supervisors with tuple-based or map-based internal state shapes.
 
 **Example**:
 ```elixir
@@ -673,6 +674,8 @@ Verifies supervision tree matches expected structure.
 
 When `expected` contains `:supervisor` and/or `:strategy`, both are validated.
 Leaf child entries also validate expected child modules.
+
+If `:supervisor` is provided but the runtime module cannot be determined, the assertion raises.
 
 **Example**:
 ```elixir
@@ -801,6 +804,7 @@ Randomly kills children in supervision tree.
 - `:kill_reason` - Reason for kills (default: :kill)
 
 `kill_rate: 0.0` is a valid no-kill baseline.
+The `supervisor` argument can be a pid or a registered name.
 
 **Example**:
 ```elixir
@@ -816,6 +820,8 @@ assert report.supervisor_crashed == false
 
 `report.restarted` reflects observed replacements and may be lower than `report.killed`
 (for example, with temporary children).
+Duplicate child IDs (such as `:undefined` IDs from dynamic children) are handled without
+overcounting replacements.
 
 #### simulate_resource_exhaustion/2
 
@@ -830,6 +836,8 @@ Simulates resource limit scenarios.
 - `:process_limit` - Spawn many processes
 - `:ets_tables` - Create many ETS tables
 - `:memory` - Allocate memory
+
+Non-positive `spawn_count` / `count` values are treated as an explicit no-op.
 
 **Example**:
 ```elixir
@@ -1184,7 +1192,8 @@ assert_child_count(supervisor, 5)
 ```
 
 Detects persistent process leaks attributable to the operation caller (spawned or linked
-processes), reducing false positives from unrelated concurrent activity.
+processes, including descendant spawn trees), reducing false positives from unrelated
+concurrent activity.
 
 **Example**:
 ```elixir

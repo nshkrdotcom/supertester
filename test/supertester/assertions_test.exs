@@ -111,4 +111,42 @@ defmodule Supertester.AssertionsTest do
       end
     end
   end
+
+  test "assert_no_process_leaks detects leaked descendant processes" do
+    parent = self()
+
+    try do
+      assert_raise RuntimeError, ~r/Process leaks detected/, fn ->
+        assert_no_process_leaks(fn ->
+          spawn(fn ->
+            leaked =
+              spawn(fn ->
+                receive do
+                  :stop -> :ok
+                after
+                  5_000 -> :ok
+                end
+              end)
+
+            send(parent, {:leaked_descendant, leaked})
+          end)
+
+          receive do
+            {:leaked_descendant, _pid} -> :ok
+          after
+            100 -> :ok
+          end
+        end)
+      end
+    after
+      receive do
+        {:leaked_descendant, pid} when is_pid(pid) ->
+          if Process.alive?(pid) do
+            send(pid, :stop)
+          end
+      after
+        0 -> :ok
+      end
+    end
+  end
 end

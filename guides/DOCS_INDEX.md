@@ -13,6 +13,7 @@ This folder contains the user-facing guides and reference material published wit
 ## Reference
 
 - **[API_GUIDE.md](API_GUIDE.md)** - Detailed API reference and usage patterns
+- Includes current edge-case behavior notes for supervisor introspection, chaos timeout/restart reporting, and leak/resource safety semantics.
 
 ## Release Notes
 

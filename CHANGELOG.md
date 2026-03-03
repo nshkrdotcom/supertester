@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.0] - 2026-03-02
 
 ### Changed
-- README and guides refreshed for current 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, and expanded helper coverage).
+- README and guides refreshed for current 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, and expanded helper coverage), including corrected chaos, supervisor, and leak-detection semantics.
 - `GenServerHelpers.cast_and_sync/4` now consistently returns `{:error, :missing_sync_handler}` in non-strict mode whenever sync handling is missing (instead of returning `:ok` on alive targets).
 - `SupervisorHelpers.assert_supervision_tree_structure/2` now validates expected child modules for leaf children, not only child IDs.
 - `Assertions.assert_no_process_leaks/1` now scopes leak detection to processes spawned or linked by the operation caller, reducing async false positives.
@@ -20,10 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Isolation and helper naming paths no longer rely on unbounded dynamic atom creation (`test_id` is string-based; shared registry/process naming are atom-safe).
 - `GenServerHelpers.cast_and_sync/4` now returns `{:error, :missing_sync_handler}` in non-strict mode when sync probing reveals a missing handler via process exit.
-- `SupervisorHelpers.test_restart_strategy/3` and `assert_supervision_tree_structure/2` now enforce expected strategy/module checks more strictly.
+- `SupervisorHelpers.test_restart_strategy/3` and `assert_supervision_tree_structure/2` now enforce expected strategy/module checks more strictly, including map-based supervisor internals (`DynamicSupervisor`).
 - `Assertions.assert_supervisor_strategy/2` now validates runtime supervisor strategy instead of only process accessibility.
-- `ChaosHelpers.chaos_kill_children/2` now reports observed child replacements for `restarted`, and `run_chaos_suite/3` now enforces suite-wide timeout semantics.
-- `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately and reports persistent leaks with lower false-positive noise.
+- `ChaosHelpers.chaos_kill_children/2` now accepts registered supervisor names (`:local`, `{:global, _}`, `{:via, _, _}`) in addition to pid inputs.
+- `ChaosHelpers.chaos_kill_children/2` now reports observed child replacements for `restarted`, handles duplicate child IDs correctly (for example, dynamic children with `:undefined` IDs), and `run_chaos_suite/3` enforces suite-wide timeout semantics.
+- `ChaosHelpers.simulate_resource_exhaustion/2` now treats non-positive `spawn_count` / `count` values as no-op requests instead of allocating resources via descending ranges.
+- `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately, traces spawned descendant trees, and reports persistent leaks with lower false-positive noise.
 - Updated version assertion test to `0.6.0`.
 - Refactored `GenServerHelpers.concurrent_calls/4` internals to satisfy strict Credo nesting limits without behavior changes.
 

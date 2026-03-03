@@ -371,6 +371,8 @@ This module provides helpers for testing supervision trees and restart strategie
 
 Tests a supervisor's restart strategy (`:one_for_one`, `:one_for_all`, etc.) with a given failure scenario.
 If `strategy` does not match the runtime supervisor strategy, the function raises.
+This strategy introspection supports both tuple-based and map-based supervisor internals
+(including `DynamicSupervisor` states).
 
 *   **Signature:** `@spec test_restart_strategy(Supervisor.supervisor(), atom(), restart_scenario()) :: test_result()`
 *   **Example:**
@@ -382,7 +384,12 @@ If `strategy` does not match the runtime supervisor strategy, the function raise
 
 **`assert_supervision_tree_structure(supervisor, expected)`**
 
-Validates the structure of a supervision tree. When `expected` includes `:supervisor` and/or `:strategy`, those are validated too. Leaf child entries also validate both child ID and expected module.
+Validates the structure of a supervision tree. When `expected` includes `:supervisor` and/or
+`:strategy`, those are validated too. Leaf child entries also validate both child ID and
+expected module.
+
+If `:supervisor` is provided but the runtime module cannot be determined, the assertion raises
+instead of silently skipping module validation.
 
 *   **Signature:** `@spec assert_supervision_tree_structure(Supervisor.supervisor(), tree_structure()) :: :ok`
 *   **Example:**
@@ -451,7 +458,10 @@ Injects a controlled crash into a process.
 
 **`chaos_kill_children(supervisor, opts \\ [])`**
 
-Randomly kills children in a supervision tree to test restart strategies and system resilience. The `restarted` metric is measured from observed child replacements and may be lower than `killed` (for example, with temporary children).
+Randomly kills children in a supervision tree to test restart strategies and system resilience.
+This helper accepts supervisor pids and registered names (`:local`, `{:global, _}`, `{:via, _, _}`).
+The `restarted` metric is measured from observed child replacements and may be lower than `killed`
+(for example, with temporary children).
 
 *   **Signature:** `@spec chaos_kill_children(Supervisor.supervisor(), keyword()) :: chaos_report()`
 *   **Options:** `:kill_rate`, `:duration_ms`, `:kill_interval_ms`
@@ -464,6 +474,7 @@ Randomly kills children in a supervision tree to test restart strategies and sys
 **`simulate_resource_exhaustion(resource, opts \\ [])`**
 
 Simulates resource exhaustion scenarios, such as process or ETS table limits.
+Non-positive `spawn_count` / `count` values are treated as an explicit no-op.
 
 *   **Signature:** `@spec simulate_resource_exhaustion(atom(), keyword()) :: {:ok, cleanup_fn :: (-> :ok)} | {:error, term()}`
 *   **Resources:** `:process_limit`, `:ets_tables`, `:memory`
@@ -779,7 +790,7 @@ This module provides a set of custom, OTP-aware assertions.
 *   `assert_supervisor_strategy(supervisor, expected_strategy)`
 *   `assert_child_count(supervisor, expected_count)`
 *   `assert_all_children_alive(supervisor)`
-*   `assert_no_process_leaks(operation_fun)` (tracks processes spawned/linked by the operation caller)
+*   `assert_no_process_leaks(operation_fun)` (tracks processes spawned/linked by the operation caller, including descendant spawn trees)
 *   `assert_memory_usage_stable(operation_fun, tolerance)`
 *   `assert_performance_within_bounds(benchmark_result, expectations)`
 

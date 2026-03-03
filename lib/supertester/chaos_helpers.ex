@@ -155,7 +155,11 @@ defmodule Supertester.ChaosHelpers do
     start_time = System.monotonic_time(:millisecond)
     end_time = start_time + duration_ms
 
-    initial_supervisor_alive = Process.alive?(supervisor)
+    initial_supervisor_alive =
+      case resolve_supervisor_pid(supervisor) do
+        pid when is_pid(pid) -> Process.alive?(pid)
+        _ -> false
+      end
 
     # Run chaos loop
     stats =
@@ -164,7 +168,12 @@ defmodule Supertester.ChaosHelpers do
         restarted: 0
       })
 
-    final_supervisor_alive = Process.alive?(supervisor)
+    final_supervisor_alive =
+      case resolve_supervisor_pid(supervisor) do
+        pid when is_pid(pid) -> Process.alive?(pid)
+        _ -> false
+      end
+
     duration = System.monotonic_time(:millisecond) - start_time
 
     %{
@@ -214,13 +223,19 @@ defmodule Supertester.ChaosHelpers do
   end
 
   def simulate_resource_exhaustion(:ets_tables, opts) do
-    count = Keyword.get(opts, :count, 50)
+    count =
+      opts
+      |> Keyword.get(:count, 50)
+      |> normalize_non_neg_count()
 
     # Create ETS tables
     tables =
-      for i <- 1..count do
-        _ = i
-        :ets.new(:supertester_chaos_table, [:set, :public])
+      if count > 0 do
+        for _ <- 1..count do
+          :ets.new(:supertester_chaos_table, [:set, :public])
+        end
+      else
+        []
       end
 
     cleanup_fn = fn ->
@@ -277,12 +292,18 @@ defmodule Supertester.ChaosHelpers do
     case Keyword.get(opts, :spawn_count) do
       nil ->
         percentage = Keyword.get(opts, :percentage, 0.05)
-        trunc(10_000 * percentage)
+        max(trunc(10_000 * percentage), 0)
 
       count ->
-        count
+        normalize_non_neg_count(count)
     end
   end
+
+  defp normalize_non_neg_count(value) when is_integer(value), do: max(value, 0)
+  defp normalize_non_neg_count(value) when is_float(value), do: max(trunc(value), 0)
+  defp normalize_non_neg_count(_value), do: 0
+
+  defp spawn_resource_processes(spawn_count) when spawn_count <= 0, do: []
 
   defp spawn_resource_processes(spawn_count) do
     for _ <- 1..spawn_count do
@@ -433,7 +454,7 @@ defmodule Supertester.ChaosHelpers do
         kill_interval_ms -> :ok
       end
 
-      restarted_count = count_restarted_children(supervisor, killed_children)
+      restarted_count = count_restarted_children(supervisor, children, killed_children)
 
       new_stats = %{
         killed: stats.killed + killed_count,
@@ -472,9 +493,9 @@ defmodule Supertester.ChaosHelpers do
     {killed, Enum.reverse(killed_children)}
   end
 
-  defp count_restarted_children(_supervisor, []), do: 0
+  defp count_restarted_children(_supervisor, _initial_children, []), do: 0
 
-  defp count_restarted_children(supervisor, killed_children) do
+  defp count_restarted_children(supervisor, initial_children, killed_children) do
     current_children =
       try do
         Supervisor.which_children(supervisor)
@@ -482,20 +503,35 @@ defmodule Supertester.ChaosHelpers do
         _ -> []
       end
 
-    Enum.count(killed_children, &child_restarted?(&1, current_children))
+    initial_by_id = group_child_pids_by_id(initial_children)
+    current_by_id = group_child_pids_by_id(current_children)
+    killed_by_id = group_killed_pids_by_id(killed_children)
+
+    Enum.reduce(killed_by_id, 0, fn {id, killed_pids}, acc ->
+      killed_set = MapSet.new(killed_pids)
+      initial_set = MapSet.new(Map.get(initial_by_id, id, []))
+      survivors = MapSet.difference(initial_set, killed_set)
+      current_set = MapSet.new(Map.get(current_by_id, id, []))
+      replacement_count = current_set |> MapSet.difference(survivors) |> MapSet.size()
+      acc + min(MapSet.size(killed_set), replacement_count)
+    end)
   end
 
-  defp child_restarted?({id, old_pid}, current_children) do
-    current_children
-    |> Enum.find(fn {child_id, _pid, _type, _mods} -> child_id == id end)
-    |> restarted_child?(id, old_pid)
+  defp group_child_pids_by_id(children) do
+    Enum.reduce(children, %{}, fn
+      {id, pid, _type, _mods}, acc when is_pid(pid) ->
+        Map.update(acc, id, [pid], &[pid | &1])
+
+      _child, acc ->
+        acc
+    end)
   end
 
-  defp restarted_child?({id, new_pid, _type, _mods}, id, old_pid) when is_pid(new_pid) do
-    new_pid != old_pid and Process.alive?(new_pid)
+  defp group_killed_pids_by_id(killed_children) do
+    Enum.reduce(killed_children, %{}, fn {id, pid}, acc ->
+      Map.update(acc, id, [pid], &[pid | &1])
+    end)
   end
-
-  defp restarted_child?(_, _id, _old_pid), do: false
 
   defp wait_for_recovery(recovery_fn, start_time, timeout) do
     current_time = System.monotonic_time(:millisecond)
@@ -607,4 +643,23 @@ defmodule Supertester.ChaosHelpers do
     elapsed = System.monotonic_time(:millisecond) - suite_start
     max(timeout_ms - elapsed, 0)
   end
+
+  defp resolve_supervisor_pid(pid) when is_pid(pid), do: pid
+  defp resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
+
+  defp resolve_supervisor_pid({:global, name}) do
+    case :global.whereis_name(name) do
+      :undefined -> nil
+      pid -> pid
+    end
+  end
+
+  defp resolve_supervisor_pid({:via, module, name}) do
+    case module.whereis_name(name) do
+      :undefined -> nil
+      pid -> pid
+    end
+  end
+
+  defp resolve_supervisor_pid(_), do: nil
 end

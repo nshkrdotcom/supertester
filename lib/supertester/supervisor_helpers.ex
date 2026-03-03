@@ -421,7 +421,11 @@ defmodule Supertester.SupervisorHelpers do
       expected_module ->
         actual_module = extract_supervisor_module(supervisor)
 
-        if actual_module != nil and actual_module != expected_module do
+        if actual_module == nil do
+          raise "Unable to determine supervisor module for #{inspect(supervisor)}"
+        end
+
+        if actual_module != expected_module do
           raise "Expected supervisor module #{inspect(expected_module)}, got #{inspect(actual_module)}"
         end
     end
@@ -451,6 +455,9 @@ defmodule Supertester.SupervisorHelpers do
     |> do_extract_supervisor_strategy()
   end
 
+  defp do_extract_supervisor_strategy(%{strategy: strategy}) when strategy in @strategies,
+    do: strategy
+
   defp do_extract_supervisor_strategy({:state, _name, strategy, _rest})
        when strategy in @strategies,
        do: strategy
@@ -468,6 +475,8 @@ defmodule Supertester.SupervisorHelpers do
     |> fetch_supervisor_state()
     |> do_extract_supervisor_module()
   end
+
+  defp do_extract_supervisor_module(%{mod: module}) when is_atom(module), do: module
 
   defp do_extract_supervisor_module({:state, {_pid, module}, _strategy, _rest})
        when is_atom(module),

@@ -387,6 +387,7 @@ defmodule Supertester.Assertions do
   # Private functions
 
   @strategies [:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one]
+  @type pid_set :: %{optional(pid()) => true}
 
   defp extract_supervisor_strategy(supervisor) do
     state = :sys.get_state(supervisor)
@@ -413,39 +414,69 @@ defmodule Supertester.Assertions do
   end
 
   defp capture_spawned_processes(operation_fun) do
-    caller = self()
-    :erlang.trace(caller, true, [:procs])
+    tracer = self()
+    :erlang.trace(tracer, true, [:procs, :set_on_spawn])
 
     try do
       operation_fun.()
     after
-      :erlang.trace(caller, false, [:procs])
+      :erlang.trace(tracer, false, [:procs, :set_on_spawn])
     end
 
-    drain_spawn_trace_messages(caller, [])
-    |> Enum.uniq()
+    {spawned, traced} = drain_spawn_trace_messages(%{}, pid_set_put(%{}, tracer))
+    disable_process_tracing(pid_set_to_list(traced))
+
+    {spawned, _traced_after_disable} = drain_spawn_trace_messages(spawned, traced)
+    pid_set_to_list(spawned)
   end
 
-  defp drain_spawn_trace_messages(caller, acc) do
+  @spec drain_spawn_trace_messages(pid_set(), pid_set()) :: {pid_set(), pid_set()}
+  defp drain_spawn_trace_messages(spawned_acc, traced_acc) do
     receive do
-      {:trace, ^caller, :spawn, spawned_pid, _mfa} when is_pid(spawned_pid) ->
-        drain_spawn_trace_messages(caller, [spawned_pid | acc])
+      {:trace, traced_pid, :spawn, spawned_pid, _mfa}
+      when is_pid(traced_pid) and is_pid(spawned_pid) ->
+        drain_spawn_trace_messages(
+          pid_set_put(spawned_acc, spawned_pid),
+          traced_acc |> pid_set_put(traced_pid) |> pid_set_put(spawned_pid)
+        )
 
-      {:trace, ^caller, :spawned, spawned_pid, _mfa} when is_pid(spawned_pid) ->
-        drain_spawn_trace_messages(caller, [spawned_pid | acc])
+      {:trace, traced_pid, :spawned, spawned_pid, _mfa}
+      when is_pid(traced_pid) and is_pid(spawned_pid) ->
+        drain_spawn_trace_messages(
+          pid_set_put(spawned_acc, spawned_pid),
+          traced_acc |> pid_set_put(traced_pid) |> pid_set_put(spawned_pid)
+        )
 
-      {:trace, ^caller, _event, _arg} ->
-        drain_spawn_trace_messages(caller, acc)
+      {:trace, traced_pid, _event, _arg} when is_pid(traced_pid) ->
+        drain_spawn_trace_messages(spawned_acc, pid_set_put(traced_acc, traced_pid))
 
-      {:trace, ^caller, _event, _arg1, _arg2} ->
-        drain_spawn_trace_messages(caller, acc)
+      {:trace, traced_pid, _event, _arg1, _arg2} when is_pid(traced_pid) ->
+        drain_spawn_trace_messages(spawned_acc, pid_set_put(traced_acc, traced_pid))
 
-      {:trace, ^caller, _event, _arg1, _arg2, _arg3} ->
-        drain_spawn_trace_messages(caller, acc)
+      {:trace, traced_pid, _event, _arg1, _arg2, _arg3} when is_pid(traced_pid) ->
+        drain_spawn_trace_messages(spawned_acc, pid_set_put(traced_acc, traced_pid))
     after
       0 ->
-        acc
+        {spawned_acc, traced_acc}
     end
+  end
+
+  @spec pid_set_put(pid_set(), pid()) :: pid_set()
+  defp pid_set_put(set, pid), do: Map.put(set, pid, true)
+
+  @spec pid_set_to_list(pid_set()) :: [pid()]
+  defp pid_set_to_list(set), do: Map.keys(set)
+
+  defp disable_process_tracing(pids) do
+    Enum.each(pids, fn pid ->
+      if Process.alive?(pid) do
+        try do
+          :erlang.trace(pid, false, [:all])
+        catch
+          :error, _ -> :ok
+        end
+      end
+    end)
   end
 
   defp persistent_process?(pid, wait_ms) do

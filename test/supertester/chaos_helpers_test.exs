@@ -100,6 +100,25 @@ defmodule Supertester.ChaosHelpersTest do
     end
   end
 
+  defmodule DynamicTemporaryWorker do
+    use GenServer
+
+    def start_link(arg) do
+      GenServer.start_link(__MODULE__, arg)
+    end
+
+    @impl true
+    def init(arg), do: {:ok, arg}
+
+    def child_spec(arg) do
+      %{
+        id: :dynamic_temporary_worker,
+        start: {__MODULE__, :start_link, [arg]},
+        restart: :temporary
+      }
+    end
+  end
+
   describe "inject_crash/3" do
     test "injects a single crash into a process" do
       # Trap exits so we don't crash when worker crashes
@@ -267,6 +286,37 @@ defmodule Supertester.ChaosHelpersTest do
       assert report.restarted == 0
       assert Supervisor.which_children(supervisor) == []
     end
+
+    test "restarted accounting does not overcount for duplicate child IDs" do
+      {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
+      {:ok, _pid_1} = DynamicSupervisor.start_child(supervisor, {DynamicTemporaryWorker, 1})
+      {:ok, _pid_2} = DynamicSupervisor.start_child(supervisor, {DynamicTemporaryWorker, 2})
+
+      report =
+        chaos_kill_children(supervisor, kill_rate: 0.5, duration_ms: 60, kill_interval_ms: 20)
+
+      assert report.killed >= 1
+      assert report.restarted == 0
+    end
+
+    test "accepts registered supervisor names" do
+      global_name =
+        {:global, {:chaos_named_supervisor, self(), System.unique_integer([:positive])}}
+
+      {:ok, _supervisor} =
+        ResilientSupervisor.start_link(
+          workers: 2,
+          name: global_name
+        )
+
+      report =
+        chaos_kill_children(global_name, kill_rate: 0.0, duration_ms: 40, kill_interval_ms: 20)
+
+      assert report.killed == 0
+      assert report.restarted == 0
+      assert report.supervisor_crashed == false
+    end
   end
 
   describe "simulate_resource_exhaustion/2" do
@@ -321,6 +371,30 @@ defmodule Supertester.ChaosHelpersTest do
     test "returns error for invalid resource type" do
       assert {:error, :unsupported_resource} =
                simulate_resource_exhaustion(:invalid_resource, percentage: 0.1)
+    end
+
+    test "spawn_count 0 does not spawn any resource processes" do
+      spawned =
+        capture_direct_spawns(fn ->
+          {:ok, cleanup} = simulate_resource_exhaustion(:process_limit, spawn_count: 0)
+          cleanup.()
+        end)
+
+      assert spawned == []
+    end
+
+    test "non-positive ETS counts do not create exhaustion tables" do
+      {:ok, cleanup_zero} = simulate_resource_exhaustion(:ets_tables, count: 0)
+      {:ok, cleanup_negative} = simulate_resource_exhaustion(:ets_tables, count: -2)
+
+      tables_zero = captured_tables(cleanup_zero)
+      tables_negative = captured_tables(cleanup_negative)
+
+      cleanup_zero.()
+      cleanup_negative.()
+
+      assert tables_zero == []
+      assert tables_negative == []
     end
   end
 
@@ -481,5 +555,71 @@ defmodule Supertester.ChaosHelpersTest do
                reason in [:timeout, :suite_timeout]
              end)
     end
+
+    test "marks unexecuted scenarios as suite_timeout after a timed-out scenario" do
+      {:ok, supervisor} =
+        ResilientSupervisor.start_link(
+          workers: 1,
+          name: :"timeout_chain_sup_#{:erlang.unique_integer([:positive])}"
+        )
+
+      scenarios = [
+        %{type: :kill_children, kill_rate: 1.0, duration_ms: 250, kill_interval_ms: 50},
+        %{type: :invalid_type}
+      ]
+
+      report = run_chaos_suite(supervisor, scenarios, timeout: 100)
+
+      assert report.total_scenarios == 2
+      assert report.failed == 2
+
+      assert Enum.any?(report.failures, fn %{reason: reason} -> reason == :timeout end)
+      assert Enum.any?(report.failures, fn %{reason: reason} -> reason == :suite_timeout end)
+
+      refute Enum.any?(report.failures, fn %{reason: reason} ->
+               reason == :unknown_scenario_type
+             end)
+    end
+  end
+
+  defp capture_direct_spawns(fun) when is_function(fun, 0) do
+    caller = self()
+    :erlang.trace(caller, true, [:procs])
+
+    try do
+      fun.()
+    after
+      :erlang.trace(caller, false, [:procs])
+    end
+
+    drain_spawn_messages(caller, [])
+    |> Enum.uniq()
+  end
+
+  defp drain_spawn_messages(caller, acc) do
+    receive do
+      {:trace, ^caller, :spawn, spawned_pid, _mfa} when is_pid(spawned_pid) ->
+        drain_spawn_messages(caller, [spawned_pid | acc])
+
+      {:trace, ^caller, :spawned, spawned_pid, _mfa} when is_pid(spawned_pid) ->
+        drain_spawn_messages(caller, [spawned_pid | acc])
+
+      {:trace, ^caller, _event, _arg} ->
+        drain_spawn_messages(caller, acc)
+
+      {:trace, ^caller, _event, _arg1, _arg2} ->
+        drain_spawn_messages(caller, acc)
+
+      {:trace, ^caller, _event, _arg1, _arg2, _arg3} ->
+        drain_spawn_messages(caller, acc)
+    after
+      0 ->
+        Enum.reverse(acc)
+    end
+  end
+
+  defp captured_tables(cleanup_fun) when is_function(cleanup_fun, 0) do
+    {:env, env} = :erlang.fun_info(cleanup_fun, :env)
+    Enum.find(env, [], &is_list/1)
   end
 end

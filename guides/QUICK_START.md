@@ -78,6 +78,8 @@ test "system survives worker crashes" do
 end
 ```
 
+`chaos_kill_children/2` accepts either a supervisor pid or a registered supervisor name.
+
 **Run**: `mix test`
 **Result**: Chaos test validates resilience ✅
 
@@ -380,6 +382,9 @@ Add `use Supertester.TestableGenServer` (or use `strict?: true` to raise immedia
 
 ### Chaos tests too aggressive?
 → Reduce `kill_rate`/`duration_ms`, or set `kill_rate: 0.0` for a no-kill baseline.
+
+### Resource exhaustion helper still creates pressure when count is zero?
+→ It should not. Non-positive `spawn_count` / `count` values are treated as a no-op.
 
 ---
 
