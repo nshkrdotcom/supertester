@@ -414,7 +414,7 @@ defmodule Supertester.SupervisorHelpers do
         :ok
 
       expected_module ->
-        actual_module = extract_supervisor_module(supervisor)
+        actual_module = SupervisorIntrospection.extract_supervisor_module(supervisor)
 
         if actual_module == nil do
           raise "Unable to determine supervisor module for #{inspect(supervisor)}"
@@ -442,34 +442,5 @@ defmodule Supertester.SupervisorHelpers do
           raise "Expected supervisor strategy #{inspect(expected_strategy)}, got #{inspect(actual_strategy)}"
         end
     end
-  end
-
-  defp extract_supervisor_module(supervisor) do
-    supervisor
-    |> fetch_supervisor_state()
-    |> do_extract_supervisor_module()
-  end
-
-  defp do_extract_supervisor_module(%{mod: module}) when is_atom(module), do: module
-
-  defp do_extract_supervisor_module({:state, {_pid, module}, _strategy, _rest})
-       when is_atom(module),
-       do: module
-
-  defp do_extract_supervisor_module(tuple) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.find_value(&module_from_term/1)
-  end
-
-  defp do_extract_supervisor_module(_), do: nil
-
-  defp module_from_term({pid, module}) when is_pid(pid) and is_atom(module), do: module
-  defp module_from_term(_), do: nil
-
-  defp fetch_supervisor_state(supervisor) do
-    :sys.get_state(supervisor)
-  catch
-    :exit, _ -> nil
   end
 end

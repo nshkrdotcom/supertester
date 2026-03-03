@@ -1,5 +1,5 @@
 defmodule Supertester.OTPHelpers do
-  alias Supertester.Internal.ProcessLifecycle
+  alias Supertester.Internal.{Poller, ProcessLifecycle, ProcessRef, SharedRegistry}
 
   @moduledoc """
   OTP-compliant testing utilities for GenServer, Supervisor, and process management.
@@ -162,8 +162,7 @@ defmodule Supertester.OTPHelpers do
   """
   @spec wait_for_process_restart(atom(), pid(), timeout()) :: {:ok, pid()} | {:error, term()}
   def wait_for_process_restart(process_name, original_pid, timeout \\ 1000) do
-    start_time = System.monotonic_time(:millisecond)
-    wait_for_restart_loop(process_name, original_pid, start_time, timeout)
+    Poller.until(fn -> restart_probe(process_name, original_pid) end, timeout, 5)
   end
 
   @doc """
@@ -332,10 +331,8 @@ defmodule Supertester.OTPHelpers do
     end
   end
 
-  @shared_registry_name :supertester_shared_registry
-
   defp generate_unique_process_name(module, test_name) do
-    Supertester.UnifiedTestFoundation.ensure_shared_registry_started()
+    SharedRegistry.ensure_started()
 
     module_segment =
       module
@@ -345,31 +342,24 @@ defmodule Supertester.OTPHelpers do
 
     logical_segment = normalize_segment(test_name)
     serial = System.unique_integer([:positive, :monotonic])
+    test_segment = isolation_test_segment()
 
+    key =
+      [module_segment, logical_segment, test_segment]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("_")
+      |> case do
+        "" -> "supertester_process"
+        value -> value
+      end
+
+    {:via, Registry, {SharedRegistry.name(), {:supertester, module, key, serial}}}
+  end
+
+  defp isolation_test_segment do
     case Supertester.UnifiedTestFoundation.fetch_isolation_context() do
-      %Supertester.IsolationContext{test_id: test_id} ->
-        key =
-          [module_segment, logical_segment, normalize_segment(test_id)]
-          |> Enum.reject(&is_nil/1)
-          |> Enum.join("_")
-          |> case do
-            "" -> "supertester_process"
-            value -> value
-          end
-
-        {:via, Registry, {@shared_registry_name, {:supertester, module, key, serial}}}
-
-      _ ->
-        key =
-          [module_segment, logical_segment]
-          |> Enum.reject(&is_nil/1)
-          |> Enum.join("_")
-          |> case do
-            "" -> "supertester_process"
-            value -> value
-          end
-
-        {:via, Registry, {@shared_registry_name, {:supertester, module, key, serial}}}
+      %Supertester.IsolationContext{test_id: test_id} -> normalize_segment(test_id)
+      _ -> nil
     end
   end
 
@@ -418,58 +408,19 @@ defmodule Supertester.OTPHelpers do
     end
   end
 
-  defp wait_for_restart_loop(process_name, original_pid, start_time, timeout) do
-    current_time = System.monotonic_time(:millisecond)
-    remaining = timeout - (current_time - start_time)
+  defp restart_probe(process_name, original_pid) do
+    case ProcessRef.resolve(process_name) do
+      nil ->
+        :retry
 
-    if remaining <= 0 do
-      {:error, :timeout}
-    else
-      current_pid = Process.whereis(process_name)
+      ^original_pid ->
+        :retry
 
-      check_restart_status(
-        process_name,
-        original_pid,
-        current_pid,
-        remaining,
-        start_time,
-        timeout
-      )
+      new_pid ->
+        case wait_for_genserver_sync(new_pid, 100) do
+          :ok -> {:ok, new_pid}
+          {:error, _} -> :retry
+        end
     end
-  end
-
-  defp check_restart_status(process_name, original_pid, nil, remaining, start_time, timeout) do
-    wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout)
-  end
-
-  defp check_restart_status(
-         process_name,
-         original_pid,
-         current_pid,
-         remaining,
-         start_time,
-         timeout
-       )
-       when current_pid == original_pid do
-    wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout)
-  end
-
-  defp check_restart_status(process_name, original_pid, new_pid, remaining, start_time, timeout) do
-    case wait_for_genserver_sync(new_pid, 100) do
-      :ok ->
-        {:ok, new_pid}
-
-      {:error, _} ->
-        wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout)
-    end
-  end
-
-  defp wait_and_retry_restart(process_name, original_pid, remaining, start_time, timeout) do
-    receive do
-    after
-      min(5, remaining) -> :ok
-    end
-
-    wait_for_restart_loop(process_name, original_pid, start_time, timeout)
   end
 end

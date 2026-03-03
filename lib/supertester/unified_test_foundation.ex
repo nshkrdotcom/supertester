@@ -1,7 +1,6 @@
 defmodule Supertester.UnifiedTestFoundation do
   alias Supertester.{Env, IsolationContext}
-  alias Supertester.Internal.ProcessLifecycle
-  @shared_registry_name :supertester_shared_registry
+  alias Supertester.Internal.{Poller, ProcessLifecycle, SharedRegistry}
 
   @moduledoc """
   Isolation runtime for OTP-heavy tests.
@@ -147,8 +146,12 @@ defmodule Supertester.UnifiedTestFoundation do
   @spec wait_for_supervision_tree_ready(pid(), non_neg_integer()) ::
           {:ok, pid()} | {:error, :timeout}
   def wait_for_supervision_tree_ready(supervisor_pid, timeout \\ 5000) do
-    start_time = System.monotonic_time(:millisecond)
-    wait_for_supervisor_ready(supervisor_pid, start_time, timeout)
+    case Poller.until(fn -> supervisor_ready_probe(supervisor_pid) end, timeout, 10) do
+      {:ok, pid} -> {:ok, pid}
+      :ok -> {:ok, supervisor_pid}
+      {:error, :timeout} -> {:error, :timeout}
+      {:error, _} -> {:error, :timeout}
+    end
   end
 
   # Private functions
@@ -185,11 +188,11 @@ defmodule Supertester.UnifiedTestFoundation do
 
   defp setup_isolation_with_registry(context, isolation_type) do
     {isolation_context, _test_id} = build_isolation_context(context, isolation_type)
-    ensure_shared_registry_started()
+    SharedRegistry.ensure_started()
 
     isolation_context =
       isolation_context
-      |> Map.put(:registry, @shared_registry_name)
+      |> Map.put(:registry, SharedRegistry.name())
 
     register_cleanup(isolation_context)
 
@@ -265,23 +268,7 @@ defmodule Supertester.UnifiedTestFoundation do
 
   @doc false
   def ensure_shared_registry_started do
-    case Process.whereis(@shared_registry_name) do
-      pid when is_pid(pid) ->
-        {:ok, pid}
-
-      nil ->
-        case Registry.start_link(keys: :unique, name: @shared_registry_name) do
-          {:ok, pid} ->
-            # Unlink so the Registry survives when short-lived callers
-            # (e.g. Task processes) exit. The Registry is a shared singleton
-            # that should live for the entire BEAM lifetime.
-            Process.unlink(pid)
-            {:ok, pid}
-
-          {:error, {:already_started, pid}} ->
-            {:ok, pid}
-        end
-    end
+    SharedRegistry.ensure_started()
   end
 
   defp check_contamination(nil), do: :ok
@@ -307,27 +294,18 @@ defmodule Supertester.UnifiedTestFoundation do
     end
   end
 
-  defp wait_for_supervisor_ready(supervisor_pid, start_time, timeout) do
-    current_time = System.monotonic_time(:millisecond)
-    remaining = timeout - (current_time - start_time)
+  defp supervisor_ready_probe(supervisor_pid) do
+    children = Supervisor.which_children(supervisor_pid)
 
-    if remaining <= 0 do
-      {:error, :timeout}
+    if Enum.all?(children, &child_ready?/1) do
+      {:ok, supervisor_pid}
     else
-      children = Supervisor.which_children(supervisor_pid)
-
-      if Enum.all?(children, &child_ready?/1) do
-        {:ok, supervisor_pid}
-      else
-        # Wait using receive timeout instead of Process.sleep
-        receive do
-        after
-          min(10, remaining) -> :ok
-        end
-
-        wait_for_supervisor_ready(supervisor_pid, start_time, timeout)
-      end
+      :retry
     end
+  rescue
+    _ -> :retry
+  catch
+    :exit, _ -> :retry
   end
 
   defp child_ready?({_id, :undefined, _type, _modules}), do: false

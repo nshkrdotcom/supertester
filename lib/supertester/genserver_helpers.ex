@@ -1,5 +1,6 @@
 defmodule Supertester.GenServerHelpers do
   require Logger
+  alias Supertester.Internal.{Poller, ProcessRef}
 
   @moduledoc """
   Specialized helpers for GenServer testing patterns.
@@ -279,29 +280,12 @@ defmodule Supertester.GenServerHelpers do
   """
   @spec test_server_crash_recovery(GenServer.server(), term()) :: {:ok, map()} | {:error, term()}
   def test_server_crash_recovery(server, crash_reason) do
-    original_pid = resolve_server_pid(server)
+    original_pid = ProcessRef.resolve(server)
 
     if original_pid == nil do
       {:error, :server_not_found}
     else
       do_crash_recovery_test(server, original_pid, crash_reason)
-    end
-  end
-
-  defp resolve_server_pid(pid) when is_pid(pid), do: pid
-  defp resolve_server_pid(name) when is_atom(name), do: Process.whereis(name)
-
-  defp resolve_server_pid({:global, name}) do
-    case :global.whereis_name(name) do
-      pid when is_pid(pid) -> pid
-      _ -> nil
-    end
-  end
-
-  defp resolve_server_pid({:via, module, name}) do
-    case module.whereis_name(name) do
-      pid when is_pid(pid) -> pid
-      _ -> nil
     end
   end
 
@@ -413,48 +397,28 @@ defmodule Supertester.GenServerHelpers do
   end
 
   defp wait_for_recovery(server, original_pid, timeout) do
-    start_time = System.monotonic_time(:millisecond)
-    wait_for_recovery_loop(server, original_pid, start_time, timeout)
-  end
-
-  defp wait_for_recovery_loop(server, original_pid, start_time, timeout) do
-    current_time = System.monotonic_time(:millisecond)
-    remaining = timeout - (current_time - start_time)
-
-    if remaining <= 0 do
-      {:error, :recovery_timeout}
-    else
-      current_pid = resolve_server_pid(server)
-      check_recovery_status(server, original_pid, current_pid, remaining, start_time, timeout)
+    case Poller.until(fn -> recovery_probe(server, original_pid) end, timeout, 10) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, :timeout} -> {:error, :recovery_timeout}
+      {:error, reason} -> {:error, reason}
+      :ok -> {:ok, original_pid}
     end
   end
 
-  defp check_recovery_status(server, original_pid, nil, remaining, start_time, timeout) do
-    wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout)
-  end
+  defp recovery_probe(server, original_pid) do
+    case ProcessRef.resolve(server) do
+      nil ->
+        :retry
 
-  defp check_recovery_status(server, original_pid, current_pid, remaining, start_time, timeout)
-       when current_pid == original_pid do
-    wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout)
-  end
+      ^original_pid ->
+        :retry
 
-  defp check_recovery_status(server, original_pid, current_pid, remaining, start_time, timeout) do
-    case call_with_timeout(current_pid, :__supertester_sync__, 100) do
-      {:ok, _} ->
-        {:ok, current_pid}
-
-      {:error, _} ->
-        wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout)
+      current_pid ->
+        case call_with_timeout(current_pid, :__supertester_sync__, 100) do
+          {:ok, _} -> {:ok, current_pid}
+          {:error, _} -> :retry
+        end
     end
-  end
-
-  defp wait_and_retry_recovery(server, original_pid, remaining, start_time, timeout) do
-    receive do
-    after
-      min(10, remaining) -> :ok
-    end
-
-    wait_for_recovery_loop(server, original_pid, start_time, timeout)
   end
 
   defp handle_missing_sync(true, server, sync_message) do
@@ -469,7 +433,7 @@ defmodule Supertester.GenServerHelpers do
 
   defp log_missing_sync(server, sync_message) do
     Logger.debug(fn ->
-      if server_alive?(server) do
+      if ProcessRef.alive?(server) do
         "GenServer #{inspect(server)} ignored sync message #{inspect(sync_message)}; sync handler is required for deterministic cast assertions"
       else
         "GenServer #{inspect(server)} exited while probing sync message #{inspect(sync_message)}; sync handler is required for deterministic cast assertions"
@@ -521,29 +485,4 @@ defmodule Supertester.GenServerHelpers do
       {:error, reason} -> {:error, call, reason}
     end
   end
-
-  defp server_alive?(pid) when is_pid(pid), do: Process.alive?(pid)
-
-  defp server_alive?(name) when is_atom(name) do
-    case Process.whereis(name) do
-      pid when is_pid(pid) -> Process.alive?(pid)
-      _ -> false
-    end
-  end
-
-  defp server_alive?({:global, name}) do
-    case :global.whereis_name(name) do
-      pid when is_pid(pid) -> Process.alive?(pid)
-      _ -> false
-    end
-  end
-
-  defp server_alive?({:via, module, name}) do
-    case module.whereis_name(name) do
-      pid when is_pid(pid) -> Process.alive?(pid)
-      _ -> false
-    end
-  end
-
-  defp server_alive?(_), do: false
 end

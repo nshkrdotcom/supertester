@@ -2,6 +2,7 @@ defmodule Supertester.Internal.SupervisorIntrospection do
   @moduledoc false
   # Internal module consolidating supervisor introspection utilities
   # used by Assertions, SupervisorHelpers, and ChaosHelpers.
+  alias Supertester.Internal.ProcessRef
 
   @strategies [:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one]
 
@@ -14,25 +15,16 @@ defmodule Supertester.Internal.SupervisorIntrospection do
   end
 
   @doc false
+  @spec extract_supervisor_module(Supervisor.supervisor()) :: module() | nil
+  def extract_supervisor_module(supervisor) do
+    supervisor
+    |> fetch_supervisor_state()
+    |> do_extract_supervisor_module()
+  end
+
+  @doc false
   @spec resolve_supervisor_pid(term()) :: pid() | nil
-  def resolve_supervisor_pid(pid) when is_pid(pid), do: pid
-  def resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
-
-  def resolve_supervisor_pid({:global, name}) do
-    case :global.whereis_name(name) do
-      :undefined -> nil
-      pid -> pid
-    end
-  end
-
-  def resolve_supervisor_pid({:via, module, name}) do
-    case module.whereis_name(name) do
-      :undefined -> nil
-      pid -> pid
-    end
-  end
-
-  def resolve_supervisor_pid(_), do: nil
+  def resolve_supervisor_pid(ref), do: ProcessRef.resolve(ref)
 
   @doc false
   @spec group_child_pids_by_id([{term(), pid() | atom(), atom(), [module()]}]) ::
@@ -63,6 +55,23 @@ defmodule Supertester.Internal.SupervisorIntrospection do
   end
 
   defp do_extract_strategy(_), do: nil
+
+  defp do_extract_supervisor_module(%{mod: module}) when is_atom(module), do: module
+
+  defp do_extract_supervisor_module({:state, {_pid, module}, _strategy, _rest})
+       when is_atom(module),
+       do: module
+
+  defp do_extract_supervisor_module(tuple) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.find_value(&module_from_term/1)
+  end
+
+  defp do_extract_supervisor_module(_), do: nil
+
+  defp module_from_term({pid, module}) when is_pid(pid) and is_atom(module), do: module
+  defp module_from_term(_), do: nil
 
   defp fetch_supervisor_state(supervisor) do
     :sys.get_state(supervisor)

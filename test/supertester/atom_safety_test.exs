@@ -38,6 +38,11 @@ defmodule Supertester.AtomSafetyTest do
   end
 
   test "ets table exhaustion simulation does not allocate one atom per table" do
+    {:ok, warmup_cleanup} =
+      Supertester.ChaosHelpers.simulate_resource_exhaustion(:ets_tables, count: 0)
+
+    warmup_cleanup.()
+
     before = :erlang.system_info(:atom_count)
     {:ok, cleanup} = Supertester.ChaosHelpers.simulate_resource_exhaustion(:ets_tables, count: 20)
     cleanup.()

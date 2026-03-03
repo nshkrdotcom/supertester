@@ -199,4 +199,38 @@ defmodule Supertester.TelemetryHelpersTest do
       assert length(second_events) == 1
     end
   end
+
+  describe "official buffered handlers" do
+    setup do
+      {:ok, _} = TelemetryHelpers.setup_telemetry_isolation()
+      :ok
+    end
+
+    test "attach_isolated/2 with buffer: true supports explicit draining by handler id" do
+      {:ok, handler_id} = TelemetryHelpers.attach_isolated([:test, :buffer_api], buffer: true)
+
+      TelemetryHelpers.emit_with_context([:test, :buffer_api], %{value: 1}, %{source: :buffer})
+
+      refute_receive {:telemetry, [:test, :buffer_api], _, _}, 20
+
+      assert [
+               {:telemetry, [:test, :buffer_api], %{value: 1}, %{source: :buffer}}
+             ] = TelemetryHelpers.flush_buffered_telemetry(handler_id)
+
+      assert [] = TelemetryHelpers.flush_buffered_telemetry(handler_id)
+    end
+
+    test "flush_buffered_telemetry/1 is safe for unknown handlers" do
+      assert [] = TelemetryHelpers.flush_buffered_telemetry("missing-handler")
+    end
+
+    test "detaching a buffered handler releases buffered state" do
+      {:ok, handler_id} = TelemetryHelpers.attach_isolated([:test, :buffer_detach], buffer: true)
+
+      TelemetryHelpers.emit_with_context([:test, :buffer_detach], %{value: 2}, %{})
+      :ok = TelemetryHelpers.detach_isolated(handler_id)
+
+      assert [] = TelemetryHelpers.flush_buffered_telemetry(handler_id)
+    end
+  end
 end

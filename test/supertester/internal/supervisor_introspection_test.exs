@@ -59,6 +59,24 @@ defmodule Supertester.Internal.SupervisorIntrospectionTest do
     end
   end
 
+  describe "extract_supervisor_module/1" do
+    test "extracts module from standard Supervisor state" do
+      {:ok, sup} = OneForOneSupervisor.start_link()
+      assert SupervisorIntrospection.extract_supervisor_module(sup) == OneForOneSupervisor
+    end
+
+    test "extracts module from map-based supervisor states when available" do
+      {:ok, sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
+      assert is_atom(SupervisorIntrospection.extract_supervisor_module(sup))
+    end
+
+    test "returns nil for dead processes" do
+      {:ok, sup} = OneForOneSupervisor.start_link()
+      Supervisor.stop(sup)
+      assert SupervisorIntrospection.extract_supervisor_module(sup) == nil
+    end
+  end
+
   describe "resolve_supervisor_pid/1" do
     test "returns pid when given a pid" do
       {:ok, sup} = OneForOneSupervisor.start_link()
