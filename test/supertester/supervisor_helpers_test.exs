@@ -38,6 +38,38 @@ defmodule Supertester.SupervisorHelpersTest do
     def init(state), do: {:ok, state}
   end
 
+  defmodule TemporaryWorker do
+    use GenServer
+
+    def start_link(opts) do
+      GenServer.start_link(__MODULE__, opts, opts)
+    end
+
+    @impl true
+    def init(state), do: {:ok, state}
+  end
+
+  defmodule TemporarySupervisor do
+    use Supervisor
+
+    def start_link(opts \\ []) do
+      Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
+    end
+
+    @impl true
+    def init(_opts) do
+      children = [
+        %{
+          id: :temporary_worker,
+          start: {TemporaryWorker, :start_link, [[]]},
+          restart: :temporary
+        }
+      ]
+
+      Supervisor.init(children, strategy: :one_for_one)
+    end
+  end
+
   defmodule TestSupervisor do
     use Supervisor
 
@@ -146,6 +178,16 @@ defmodule Supertester.SupervisorHelpersTest do
 
       assert result.restarted == []
       assert result.not_restarted == []
+      assert result.supervisor_alive
+    end
+
+    test "does not report removed temporary children as restarted" do
+      {:ok, supervisor} = TemporarySupervisor.start_link()
+
+      result = test_restart_strategy(supervisor, :one_for_one, {:kill_child, :temporary_worker})
+
+      assert result.restarted == []
+      assert result.not_restarted == [:temporary_worker]
       assert result.supervisor_alive
     end
   end

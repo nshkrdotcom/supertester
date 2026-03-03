@@ -1,4 +1,6 @@
 defmodule Supertester.Assertions do
+  @persistent_leak_wait_ms 75
+
   @moduledoc """
   Custom assertions for OTP patterns and system behavior.
 
@@ -342,7 +344,8 @@ defmodule Supertester.Assertions do
     # Candidate leaks are limited to processes spawned by or linked to the operation caller.
     actual_leaks =
       Enum.filter(leak_candidates, fn pid ->
-        Process.alive?(pid) and persistent_process?(pid, 20) and reportable_process?(pid)
+        Process.alive?(pid) and persistent_process?(pid, @persistent_leak_wait_ms) and
+          reportable_process?(pid)
       end)
 
     if Enum.empty?(actual_leaks) do
@@ -449,11 +452,13 @@ defmodule Supertester.Assertions do
           traced_acc |> pid_set_put(traced_pid) |> pid_set_put(spawned_pid)
         )
 
-      {:trace, traced_pid, :spawned, spawned_pid, _mfa}
-      when is_pid(traced_pid) and is_pid(spawned_pid) ->
+      # :spawned uses the traced pid as the newly spawned process and the
+      # fourth element as its parent process.
+      {:trace, traced_pid, :spawned, parent_pid, _mfa}
+      when is_pid(traced_pid) and is_pid(parent_pid) ->
         drain_spawn_trace_messages(
-          pid_set_put(spawned_acc, spawned_pid),
-          traced_acc |> pid_set_put(traced_pid) |> pid_set_put(spawned_pid)
+          pid_set_put(spawned_acc, traced_pid),
+          traced_acc |> pid_set_put(traced_pid) |> pid_set_put(parent_pid)
         )
 
       {:trace, traced_pid, _event, _arg} when is_pid(traced_pid) ->
@@ -490,12 +495,16 @@ defmodule Supertester.Assertions do
 
   defp persistent_process?(pid, wait_ms) do
     if Process.alive?(pid) do
-      receive do
-      after
-        wait_ms -> :ok
-      end
+      ref = Process.monitor(pid)
 
-      Process.alive?(pid)
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} ->
+          false
+      after
+        wait_ms ->
+          Process.demonitor(ref, [:flush])
+          Process.alive?(pid)
+      end
     else
       false
     end

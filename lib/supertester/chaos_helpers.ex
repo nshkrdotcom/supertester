@@ -31,6 +31,7 @@ defmodule Supertester.ChaosHelpers do
   """
 
   alias Supertester.ConcurrentHarness
+  @scenario_timeout_marker :__supertester_scenario_timeout__
 
   @type crash_spec ::
           :immediate
@@ -490,20 +491,15 @@ defmodule Supertester.ChaosHelpers do
 
   defp count_restarted_children(_supervisor, _initial_children, []), do: 0
 
-  defp count_restarted_children(supervisor, initial_children, killed_children) do
+  defp count_restarted_children(supervisor, initial_children, _killed_children) do
     current_children = safe_supervisor_children(supervisor)
 
     initial_by_id = group_child_pids_by_id(initial_children)
     current_by_id = group_child_pids_by_id(current_children)
-    killed_by_id = group_killed_pids_by_id(killed_children)
 
-    Enum.reduce(killed_by_id, 0, fn {id, killed_pids}, acc ->
-      killed_set = MapSet.new(killed_pids)
-      initial_set = MapSet.new(Map.get(initial_by_id, id, []))
-      survivors = MapSet.difference(initial_set, killed_set)
-      current_set = MapSet.new(Map.get(current_by_id, id, []))
-      replacement_count = current_set |> MapSet.difference(survivors) |> MapSet.size()
-      acc + min(MapSet.size(killed_set), replacement_count)
+    Enum.reduce(initial_by_id, 0, fn {id, initial_pids}, acc ->
+      current_pids = Map.get(current_by_id, id, [])
+      acc + replacement_count(initial_pids, current_pids)
     end)
   end
 
@@ -517,10 +513,15 @@ defmodule Supertester.ChaosHelpers do
     end)
   end
 
-  defp group_killed_pids_by_id(killed_children) do
-    Enum.reduce(killed_children, %{}, fn {id, pid}, acc ->
-      Map.update(acc, id, [pid], &[pid | &1])
-    end)
+  defp replacement_count(_initial_pids, []), do: 0
+
+  defp replacement_count(initial_pids, current_pids) do
+    initial_set = MapSet.new(initial_pids)
+    current_set = MapSet.new(current_pids)
+    survivors = MapSet.intersection(initial_set, current_set) |> MapSet.size()
+    replacement_count = max(MapSet.size(current_set) - survivors, 0)
+
+    min(length(initial_pids), replacement_count)
   end
 
   defp wait_for_recovery(recovery_fn, start_time, timeout) do
@@ -602,8 +603,9 @@ defmodule Supertester.ChaosHelpers do
         result = execute_chaos_scenario_with_timeout(target, scenario, remaining)
 
         case result do
-          {:error, {^scenario, :timeout}} ->
-            {Enum.reverse([result | acc]), rest}
+          {:error, {^scenario, @scenario_timeout_marker}} ->
+            timeout_result = {:error, {scenario, :timeout}}
+            {Enum.reverse([timeout_result | acc]), rest}
 
           _ ->
             run_chaos_scenarios(target, rest, suite_start, timeout, [result | acc])
@@ -623,7 +625,7 @@ defmodule Supertester.ChaosHelpers do
         {:error, {scenario, reason}}
 
       nil ->
-        {:error, {scenario, :timeout}}
+        {:error, {scenario, @scenario_timeout_marker}}
     end
   end
 

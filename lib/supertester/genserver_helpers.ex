@@ -466,6 +466,10 @@ defmodule Supertester.GenServerHelpers do
     contains_sync_message?(message, sync_message)
   end
 
+  defp missing_sync_exit?({{:function_clause, stacktrace}, _call_info}, sync_message) do
+    sync_handler_function_clause?(stacktrace, sync_message)
+  end
+
   defp missing_sync_exit?({{%RuntimeError{message: message}, _stack}, _call_info}, sync_message) do
     contains_sync_message?(message, sync_message)
   end
@@ -475,6 +479,26 @@ defmodule Supertester.GenServerHelpers do
   defp contains_sync_message?(message, _sync_message) do
     String.contains?(message, "no handle_call/3 clause was provided")
   end
+
+  defp sync_handler_function_clause?(stacktrace, sync_message) when is_list(stacktrace) do
+    Enum.any?(stacktrace, &missing_handle_call_clause?(&1, sync_message))
+  end
+
+  defp sync_handler_function_clause?(_, _), do: false
+
+  defp missing_handle_call_clause?(
+         {_module, :handle_call, [message, _from, _state], _location},
+         sync_message
+       ),
+       do: message == sync_message
+
+  defp missing_handle_call_clause?(
+         {_module, :handle_call, [message, _from, _state]},
+         sync_message
+       ),
+       do: message == sync_message
+
+  defp missing_handle_call_clause?(_, _), do: false
 
   defp execute_concurrent_call(server, call, timeout) do
     case call_with_timeout(server, call, timeout) do

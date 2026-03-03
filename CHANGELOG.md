@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.0] - 2026-03-02
 
+### Added
+- Added regression tests for `cast_and_sync/4` function-clause missing-sync handling, temporary-child restart reporting, `:one_for_all` cascade restart accounting, ordinary `:timeout` scenario failure handling in `run_chaos_suite/3`, and short-lived transient process handling in `assert_no_process_leaks/1`.
+
 ### Changed
 - `GenServerHelpers.cast_and_sync/4` now treats any successful sync call reply as synchronized (including replies like `{:error, :unknown_call}`) and returns `{:ok, reply}`. Missing handlers still return `{:error, :missing_sync_handler}` in non-strict mode and raise in strict mode.
 - `SupervisorHelpers.test_restart_strategy/3` now raises `ArgumentError` when scenario child IDs are missing instead of silently returning a no-op restart report.
@@ -33,9 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately, traces spawned descendant trees, and reports persistent leaks with lower false-positive noise.
 - Updated version assertion test to `0.6.0`.
 - Refactored `GenServerHelpers.concurrent_calls/4` internals to satisfy strict Credo nesting limits without behavior changes.
+- `GenServerHelpers.cast_and_sync/4` now recognizes missing sync handlers when the server crashes with a `FunctionClauseError` exit shape, keeping strict/non-strict behavior consistent.
+- `SupervisorHelpers.test_restart_strategy/3` no longer misclassifies removed temporary children as restarted.
+- `ChaosHelpers.chaos_kill_children/2` restart accounting now includes observed cascade replacements (for example, `:one_for_all` sibling restarts), not only directly killed child replacements.
+- `ChaosHelpers.run_chaos_suite/3` now distinguishes true per-scenario deadline overruns from ordinary scenario failures with reason `:timeout`; only actual deadline overruns trigger suite cutoff semantics.
+- `Assertions.assert_no_process_leaks/1` corrected `:spawned` trace handling and improved persistence checks to reduce false positives from unrelated/self trace events while preserving delayed-descendant leak detection.
 
 ### Documentation
 - Updated `README.md`, `guides/QUICK_START.md`, `guides/MANUAL.md`, `guides/API_GUIDE.md`, and `guides/DOCS_INDEX.md` for current cast/sync semantics, stricter supervisor scenario validation, chaos crash handling, leak-detection behavior, atom-safety notes, and corrected arity headings.
+- Rewrote `README.md`, `guides/QUICK_START.md`, `guides/MANUAL.md`, `guides/API_GUIDE.md`, and `guides/DOCS_INDEX.md` to align examples and behavior notes with actual signatures and runtime semantics.
 
 ## [0.5.1] - 2026-01-09
 

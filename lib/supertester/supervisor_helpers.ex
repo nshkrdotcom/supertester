@@ -82,10 +82,7 @@ defmodule Supertester.SupervisorHelpers do
     # Get initial state
     initial_children = Supervisor.which_children(supervisor)
 
-    initial_state =
-      Map.new(initial_children, fn {id, pid, _type, _mods} ->
-        {id, pid}
-      end)
+    initial_state = group_child_pids_by_id(initial_children)
 
     # Execute scenario
     case scenario do
@@ -112,20 +109,17 @@ defmodule Supertester.SupervisorHelpers do
     # Get new state
     new_children = Supervisor.which_children(supervisor)
 
-    new_state =
-      Map.new(new_children, fn {id, pid, _type, _mods} ->
-        {id, pid}
-      end)
+    new_state = group_child_pids_by_id(new_children)
 
     # Compare states
     restarted =
       Enum.filter(Map.keys(initial_state), fn id ->
-        initial_state[id] != new_state[id]
+        child_restarted?(Map.get(initial_state, id, []), Map.get(new_state, id, []))
       end)
 
     not_restarted =
       Enum.filter(Map.keys(initial_state), fn id ->
-        initial_state[id] == new_state[id]
+        not child_restarted?(Map.get(initial_state, id, []), Map.get(new_state, id, []))
       end)
 
     %{
@@ -376,6 +370,27 @@ defmodule Supertester.SupervisorHelpers do
       _ ->
         {:error, :child_not_found}
     end
+  end
+
+  defp group_child_pids_by_id(children) do
+    Enum.reduce(children, %{}, fn
+      {id, pid, _type, _mods}, acc when is_pid(pid) ->
+        Map.update(acc, id, [pid], &[pid | &1])
+
+      _child, acc ->
+        acc
+    end)
+  end
+
+  defp child_restarted?(_initial_pids, []), do: false
+
+  defp child_restarted?(initial_pids, current_pids) do
+    initial_set = MapSet.new(initial_pids)
+    current_set = MapSet.new(current_pids)
+    survivors = MapSet.intersection(initial_set, current_set)
+    replacement_count = current_set |> MapSet.difference(initial_set) |> MapSet.size()
+
+    replacement_count > 0 and MapSet.size(survivors) < length(initial_pids)
   end
 
   defp assert_kill_result!(:ok, _child_id), do: :ok

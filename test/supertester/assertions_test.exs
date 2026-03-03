@@ -188,4 +188,16 @@ defmodule Supertester.AssertionsTest do
       end
     end
   end
+
+  test "assert_no_process_leaks ignores short-lived transient spawned processes" do
+    assert :ok =
+             assert_no_process_leaks(fn ->
+               spawn(fn ->
+                 receive do
+                 after
+                   35 -> :ok
+                 end
+               end)
+             end)
+  end
 end

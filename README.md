@@ -11,20 +11,11 @@
   <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/hexpm/l/supertester.svg"></a>
 </p>
 
-Supertester is an OTP-focused testing toolkit for Elixir. It helps you write deterministic tests for concurrent systems without `Process.sleep/1`, with isolation for async test execution and tooling for supervisors, chaos, and performance.
+Supertester is an OTP-focused testing toolkit for Elixir. It helps you write deterministic tests for concurrent systems without `Process.sleep/1`, while keeping tests async-safe through per-test isolation.
 
 Version: `0.6.0`
 
-## What It Solves
-
-- Flaky tests caused by race conditions and timing guesses.
-- Name collisions when running OTP tests with `async: true`.
-- Low-confidence supervision and crash-recovery tests.
-- Missing visibility into concurrency, mailbox, chaos, and performance behavior.
-
 ## Installation
-
-Add Supertester as a test dependency:
 
 ```elixir
 def deps do
@@ -34,42 +25,19 @@ def deps do
 end
 ```
 
-Then run:
-
 ```bash
 mix deps.get
 ```
 
 ## Quick Example
 
-### Before: timing-based and non-parallel-friendly
-
-```elixir
-defmodule MyApp.CounterTest do
-  use ExUnit.Case, async: false
-
-  test "increment" do
-    {:ok, _pid} = start_supervised({Counter, name: Counter})
-
-    GenServer.cast(Counter, :increment)
-    Process.sleep(50)
-
-    assert GenServer.call(Counter, :state).count == 1
-  end
-end
-```
-
-### After: isolated and deterministic
-
 ```elixir
 defmodule MyApp.CounterTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  import Supertester.OTPHelpers
-  import Supertester.GenServerHelpers
-  import Supertester.Assertions
+  import Supertester.{OTPHelpers, GenServerHelpers, Assertions}
 
-  test "increment" do
+  test "increments deterministically" do
     {:ok, counter} = setup_isolated_genserver(Counter)
 
     :ok = cast_and_sync(counter, :increment)
@@ -79,43 +47,48 @@ defmodule MyApp.CounterTest do
 end
 ```
 
-## Core Capabilities
+## Core Modules
 
-- `Supertester.ExUnitFoundation`: ExUnit adapter that wires isolation setup and async behavior.
-- `Supertester.UnifiedTestFoundation`: isolation runtime for custom harnesses.
-- `Supertester.TestableGenServer`: injects `:__supertester_sync__` handler for deterministic cast testing.
-- `Supertester.OTPHelpers`: isolated process/supervisor startup with cleanup.
-- `Supertester.GenServerHelpers`: `cast_and_sync/4`, state access, concurrent/stress helpers.
-- `Supertester.SupervisorHelpers`: restart strategy and tree structure validation.
-- `Supertester.ChaosHelpers`: crash injection, kill-children chaos, suite execution with deadline.
-- `Supertester.PerformanceHelpers`: performance bounds, mailbox growth, leak checks.
-- `Supertester.Assertions`: OTP-aware assertions for process, server, and supervisor behavior.
-- `Supertester.ConcurrentHarness`: declarative multithreaded scenario runner.
-- `Supertester.PropertyHelpers`: StreamData generators for concurrent scenarios.
-- `Supertester.MessageHarness`: mailbox tracing helpers.
-- `Supertester.Telemetry`: normalized `:telemetry` events under `[:supertester | ...]`.
-- `Supertester.TelemetryHelpers`, `LoggerIsolation`, `ETSIsolation`: per-test observability and state isolation extensions.
+- `Supertester.ExUnitFoundation` - ExUnit adapter with isolation wiring.
+- `Supertester.UnifiedTestFoundation` - isolation runtime for custom harnesses.
+- `Supertester.TestableGenServer` - injects `:__supertester_sync__` handlers.
+- `Supertester.OTPHelpers` - isolated startup/teardown helpers.
+- `Supertester.GenServerHelpers` - call/cast sync helpers and GenServer stress tools.
+- `Supertester.SupervisorHelpers` - restart strategy and tree assertions.
+- `Supertester.ChaosHelpers` - crash injection, supervisor chaos, suite runner.
+- `Supertester.PerformanceHelpers` - time/memory/reduction assertions.
+- `Supertester.Assertions` - OTP-aware process/supervisor assertions.
+- `Supertester.ConcurrentHarness` - declarative multi-thread scenario runner.
+- `Supertester.PropertyHelpers` - StreamData generators for scenarios.
+- `Supertester.MessageHarness` - mailbox tracing for diagnostics.
+- `Supertester.Telemetry`, `TelemetryHelpers`, `LoggerIsolation`, `ETSIsolation`.
 
-## Behavior Notes
+## Behavioral Notes
 
-- `cast_and_sync/4` with `strict?: true` raises on missing sync handler.
-- In non-strict mode, missing sync handlers return `{:error, :missing_sync_handler}` (never `:ok`), while explicit sync replies are returned as `{:ok, reply}`.
-- `test_restart_strategy/3` validates expected strategy and raises on mismatch or unknown scenario child IDs.
-- `assert_supervision_tree_structure/2` validates `:supervisor`, `:strategy`, and expected child modules.
-- `chaos_kill_children/2` accepts supervisor pids or registered names (`:local`, `{:global, _}`, `{:via, _, _}`).
-- `chaos_kill_children/2` returns a report even when the target supervisor crashes during the chaos loop.
-- `run_chaos_suite/3` enforces a suite-wide timeout (`:timeout` / `:suite_timeout` failure reasons).
+- `cast_and_sync/4`
+  - `strict?: true` raises `ArgumentError` when synchronization support is missing.
+  - Non-strict mode returns `{:error, :missing_sync_handler}` when missing.
+  - Explicit sync replies (including error tuples) return `{:ok, reply}`.
+- `test_restart_strategy/3`
+  - validates expected supervisor strategy and raises on mismatch.
+  - raises `ArgumentError` when scenario child IDs are unknown.
+  - temporary removed children are not reported as restarted.
+- `chaos_kill_children/2`
+  - accepts pid or registered supervisor name (`:local`, `{:global, _}`, `{:via, _, _}`).
+  - `restarted` counts observed child replacements, including cascade replacements.
+- `run_chaos_suite/3`
+  - applies a suite-level timeout.
+  - only true per-scenario deadline overruns are treated as timeout cutoffs.
+  - scenarios that independently return `{:error, :timeout}` do not stop the suite.
+- `assert_no_process_leaks/1`
+  - tracks spawned/linked processes attributable to the operation.
+  - catches delayed descendant leaks.
+  - avoids flagging short-lived transient processes as leaks.
 
-## Reliability and Safety Improvements
+## Safety
 
-Recent hardening changes include:
-
-- Atom-safe isolation and helper naming (no unbounded dynamic atom creation for test identifiers/process naming paths).
-- ETS table injection fallback no longer creates dynamic atoms at runtime.
-- Telemetry buffering avoids per-process dynamic atom creation.
-- More accurate chaos restart accounting (`restarted` is observed from child replacements, including duplicate-ID child sets).
-- `simulate_resource_exhaustion/2` treats non-positive `:spawn_count` / `:count` as an explicit no-op.
-- Stronger leak detection focused on processes spawned or linked by the operation under test, including delayed descendant spawn trees.
+- No unbounded dynamic atom creation is used for test IDs or isolation naming paths.
+- ETS fallback injection (`ETSIsolation.inject_table/3-4`) uses existing atoms only and raises instead of creating dynamic atoms.
 
 ## Documentation
 
@@ -129,10 +102,6 @@ Recent hardening changes include:
 
 - [Examples Index](examples/README.md)
 - [EchoLab Example App](examples/echo_lab/README.md)
-
-## Contributing
-
-Contributions are welcome. Please include tests for behavior changes and keep docs aligned with API updates.
 
 ## License
 

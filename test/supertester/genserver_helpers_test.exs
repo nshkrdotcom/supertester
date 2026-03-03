@@ -60,10 +60,26 @@ defmodule Supertester.GenServerHelpersTest do
     def handle_call(_message, _from, state), do: {:reply, {:error, :unknown_call}, state}
   end
 
+  defmodule PartialCallServer do
+    use GenServer
+
+    def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, %{}, opts)
+
+    @impl true
+    def init(state), do: {:ok, state}
+
+    @impl true
+    def handle_cast(:ping, state), do: {:noreply, state}
+
+    @impl true
+    def handle_call(:known_call, _from, state), do: {:reply, :ok, state}
+  end
+
   setup do
     {:ok, no_sync} = start_supervised(NoSyncServer)
     {:ok, unknown_call} = start_supervised(UnknownCallServer)
-    %{no_sync: no_sync, unknown_call: unknown_call}
+    {:ok, partial_call} = start_supervised(PartialCallServer)
+    %{no_sync: no_sync, unknown_call: unknown_call, partial_call: partial_call}
   end
 
   test "cast_and_sync raises when strict option is enabled", %{no_sync: server} do
@@ -93,6 +109,25 @@ defmodule Supertester.GenServerHelpersTest do
              cast_and_sync(server, :ping, :__supertester_sync__, strict?: true)
 
     assert Process.alive?(server)
+  end
+
+  test "cast_and_sync strict mode raises on missing sync handler exposed as function clause error",
+       %{
+         partial_call: server
+       } do
+    assert_raise ArgumentError, fn ->
+      cast_and_sync(server, :ping, :__supertester_sync__, strict?: true)
+    end
+  end
+
+  test "cast_and_sync non-strict mode maps function clause sync crashes to missing_sync_handler",
+       %{
+         partial_call: server
+       } do
+    assert {:error, :missing_sync_handler} =
+             cast_and_sync(server, :ping, :__supertester_sync__, strict?: false)
+
+    refute Process.alive?(server)
   end
 
   test "concurrent_calls returns structured successes and errors" do

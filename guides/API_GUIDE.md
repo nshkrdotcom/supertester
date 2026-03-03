@@ -1,1524 +1,182 @@
 # Supertester API Guide
-**Version**: 0.6.0
-**Last Updated**: March 3, 2026
 
-Reference guide for the primary Supertester modules and workflows.
+Version: 0.6.0  
+Last Updated: March 3, 2026
 
----
+This guide documents the main public APIs and behavior-sensitive edge cases.
 
-## Table of Contents
+## Core
 
-1. [Core Modules](#core-modules)
-2. [Supertester.ConcurrentHarness](#supertesterconcurrentharness)
-3. [Supertester.PropertyHelpers](#supertesterpropertyhelpers)
-4. [Supertester.MessageHarness](#supertestermessageharness)
-5. [Supertester.Telemetry](#supertestertelemetry)
-6. [Isolation Extensions](#isolation-extensions)
-7. [OTP Testing](#otp-testing)
-8. [Chaos Engineering](#chaos-engineering)
-9. [Performance Testing](#performance-testing)
-10. [Assertions](#assertions)
-11. [Quick Reference](#quick-reference)
+### `Supertester.version/0`
 
----
-
-## Core Modules
-
-### Supertester
-
-Main module providing version information.
-
-```elixir
-Supertester.version()
-# => "0.6.0"
-```
-
-### Supertester.ExUnitFoundation
-
-Drop-in ExUnit adapter that configures isolation automatically.
-
-#### Isolation Modes (`:isolation` option)
-
-- **`:basic`** – Basic isolation with unique naming (async-friendly)
-- **`:registry`** – Registry-backed process isolation (async-friendly)
-- **`:full_isolation`** – Complete process and ETS isolation (recommended, async-friendly)
-- **`:contamination_detection`** – Isolation with leak detection (runs synchronously)
-
-#### Usage
-
-```elixir
-defmodule MyApp.MyTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
-
-  test "isolated test", context do
-    # context.isolation_context contains isolation info
-    {:ok, server} = setup_isolated_genserver(MyServer)
-    # Test runs in complete isolation
-  end
-end
-```
-
-#### Additional Isolation Options
-
-- `telemetry_isolation: true` enables `Supertester.TelemetryHelpers` for the test process.
-- `logger_isolation: true` enables `Supertester.LoggerIsolation` for the test process.
-- `ets_isolation: [...]` mirrors named ETS tables into isolated copies.
-- `@tag telemetry_events: [...]` auto-attaches isolated telemetry handlers.
-- `@tag ets_tables: [...]` mirrors tables for the current test.
-- `@tag logger_level: :debug` overrides the logger level for the test process.
-
-```elixir
-defmodule MyApp.MyTest do
-  use Supertester.ExUnitFoundation,
-    isolation: :full_isolation,
-    telemetry_isolation: true,
-    logger_isolation: true,
-    ets_isolation: [:my_table]
-
-  @tag telemetry_events: [[:supertester, :concurrent, :scenario, :stop]]
-  @tag logger_level: :debug
-  test "captures telemetry + logs", _context do
-    # ...
-  end
-end
-```
-
-### Supertester.UnifiedTestFoundation
-
-Isolation runtime powering Supertester. Use it directly for custom harnesses or non-ExUnit integrations. The legacy `use Supertester.UnifiedTestFoundation` macro delegates to `Supertester.ExUnitFoundation` and emits a warning.
-
-```elixir
-defmodule CustomHarnessTest do
-  use ExUnit.Case, async: true
-
-  setup context do
-    Supertester.UnifiedTestFoundation.setup_isolation(:full_isolation, context)
-  end
-end
-```
-
-### Supertester.Env
-
-Environment abstraction used to register cleanup callbacks. The default implementation uses `ExUnit.Callbacks.on_exit/1`, but you can configure a custom module that implements the `Supertester.Env` behaviour:
-
-```elixir
-defmodule MyHarness.Env do
-  @behaviour Supertester.Env
-
-  @impl true
-  def on_exit(fun), do: MyHarness.register_cleanup(fun)
-end
-
-# config/test.exs
-import Config
-config :supertester, :env_module, MyHarness.Env
-```
-
-### Supertester.TestableGenServer
-
-Automatically injects sync handlers into GenServers for deterministic testing.
-
-#### Usage in GenServer
-
-```elixir
-defmodule MyServer do
-  use GenServer
-  use Supertester.TestableGenServer  # Adds __supertester_sync__ handler
-
-  # Your GenServer implementation
-end
-```
-
-#### Usage in Tests
-
-```elixir
-test "async operations" do
-  {:ok, server} = MyServer.start_link()
-
-  # Send async cast
-  GenServer.cast(server, :some_operation)
-
-  # Synchronize - ensures cast is processed
-  GenServer.call(server, :__supertester_sync__)
-
-  # Now safe to verify
-  assert :sys.get_state(server).operation_complete == true
-end
-```
-
-#### With State Return
-
-```elixir
-# Get state without :sys.get_state
-{:ok, state} = GenServer.call(server, {:__supertester_sync__, return_state: true})
-```
-
----
-
-## Supertester.ConcurrentHarness
-
-High-level scenario harness for orchestrating concurrent threads against a target process.
-
-### run/1
-
-```elixir
-@spec run(Supertester.ConcurrentHarness.scenario()) ::
-        {:ok, %{events: [map()], metrics: map(), mailbox: map() | nil}} | {:error, term()}
-```
-
-Runs a scenario built via `simple_genserver_scenario/4`, `from_property_config/3`, or a manual map.
-
-- `:threads` – List of thread scripts (`[operation()]`)
-- `:timeout_ms` – Overall timeout (default: 5_000)
-- `:mailbox` – Keyword list forwarded to `PerformanceHelpers.measure_mailbox_growth/3`
-- `:invariant` – `fn pid, ctx -> ... end` run after threads complete
-- `:chaos` – Optional `(pid, ctx) -> any` hook executed concurrently (see helpers below)
-- `:performance_expectations` – Keyword list of bounds enforced automatically
-
-Every run emits telemetry events under `[:supertester, :concurrent, :scenario, :start|:stop]`
-along with optional mailbox/performance/chaos events. Reports include `:chaos`, `:performance`,
-and the auto-generated `:scenario_id` metadata for downstream correlation.
-
-### simple_genserver_scenario/4
-
-```elixir
-@spec simple_genserver_scenario(module(), [term()], pos_integer(), keyword()) ::
-        Supertester.ConcurrentHarness.Scenario.t()
-```
-
-Bootstraps a scenario for a GenServer module. Accepts options such as:
-
-- `:server_opts` – Passed to `start_link/1`
-- `:default_operation` – Tag bare terms as `:call` or `:cast`
-- `:invariant` – Function to run after threads finish
-- `:mailbox` – Monitoring configuration
-- `:chaos` – Chaos hook (e.g., `chaos_inject_crash/2`)
-- `:performance_expectations` – Keyword list for automatic performance enforcement
-
-### from_property_config/3
-
-```elixir
-@spec from_property_config(module(), map(), keyword()) ::
-        Supertester.ConcurrentHarness.Scenario.t()
-```
-
-Converts a map (often emitted by `PropertyHelpers.concurrent_scenario/1`) into a runnable scenario.
-
-### run_with_performance/2
-
-```elixir
-@spec run_with_performance(scenario(), keyword()) ::
-        {:ok, map()} | {:error, term()}
-```
-
-Convenience helper that measures `run/1`, enforces expectations, and returns the scenario result.
-Avoids wrapping every test manually with `assert_performance/2`.
-
-### chaos_kill_children/1 and chaos_inject_crash/2
-
-```elixir
-@spec chaos_kill_children(keyword()) :: chaos_fun()
-@spec chaos_inject_crash(ChaosHelpers.crash_spec(), keyword()) :: chaos_fun()
-```
-
-Generate ready-to-use chaos hooks sourced from `Supertester.ChaosHelpers`. Use them in the `:chaos`
-option when building scenarios:
-
-```elixir
-scenario = Supertester.ConcurrentHarness.simple_genserver_scenario(
-  MySupervisor,
-  [:status],
-  3,
-  chaos: Supertester.ConcurrentHarness.chaos_kill_children(kill_rate: 0.2)
-)
-```
-
----
-
-## Supertester.PropertyHelpers
-
-StreamData helpers for generating concurrency scenarios.
-
-### genserver_operation_sequence/2
-
-```elixir
-@spec genserver_operation_sequence([term()], keyword()) ::
-        StreamData.t([Supertester.ConcurrentHarness.operation()])
-```
-
-Generates lists of normalized operations (`{:call, term}`, `{:cast, term}`, or `{:custom, fun}`).
-Options include `:default_operation`, `:min_length`, and `:max_length`.
-
-### concurrent_scenario/1
-
-```elixir
-@spec concurrent_scenario(keyword()) :: StreamData.t(map())
-```
-
-Produces property-test-friendly configs with `:thread_scripts`, `:timeout_ms`, and metadata.
-Feed the output to `ConcurrentHarness.from_property_config/3`.
-
----
-
-## Supertester.MessageHarness
-
-Mailbox visibility utilities.
-
-### trace_messages/3
-
-```elixir
-@spec trace_messages(pid(), (() -> any()), keyword()) :: %{
-        messages: [term()],
-        initial_mailbox: [term()],
-        final_mailbox: [term()],
-        result: term()
-      }
-```
-
-Enables `:erlang.trace/3` for `:receive` events while running the provided function, capturing the
-messages delivered to the target process and snapshotting its mailbox before/after execution.
-
----
-
-## Supertester.Telemetry
-
-Single entry point for emitting telemetry events with the `[:supertester | event]` prefix.
-
-### scenario_start/1 and scenario_stop/2
-
-```elixir
-Telemetry.scenario_start(%{scenario_id: 123})
-Telemetry.scenario_stop(%{duration_ms: 42}, %{scenario_id: 123, status: :ok})
-```
-
-Used internally by the concurrent harness but available if you extend the library.
-
-### mailbox_sample/2, chaos_event/3, performance_event/2
-
-Emit mailbox metrics, chaos lifecycle updates, and performance measurements respectively.
-All helpers ultimately call `emit/3`, so you can attach via `:telemetry.attach/4` or
-`attach_many/4`:
-
-```elixir
-:telemetry.attach(
-  "supertester-log",
-  [:supertester, :performance, :scenario, :measured],
-  fn _event, measurements, metadata, _ ->
-    Logger.debug("Scenario #{metadata.scenario_id} took #{measurements.time_us / 1000}ms")
-  end,
-  nil
-)
-```
-
----
-
-## Isolation Extensions
-
-### Supertester.TelemetryHelpers
-
-Per-test telemetry isolation that only delivers events tagged with the current test id.
-
-```elixir
-{:ok, _test_id} = Supertester.TelemetryHelpers.setup_telemetry_isolation()
-{:ok, _handler} = Supertester.TelemetryHelpers.attach_isolated([:my, :event])
-
-Supertester.TelemetryHelpers.emit_with_context([:my, :event], %{value: 1}, %{})
-assert Supertester.TelemetryHelpers.assert_telemetry([:my, :event])
-```
-
-Key helpers:
-
-- `setup_telemetry_isolation/0` and `setup_telemetry_isolation/1`
-- `attach_isolated/2` with `passthrough`, `buffer`, `filter_key`, and `transform`
-- `assert_telemetry/1-3`, `refute_telemetry/2`, `assert_telemetry_count/2`, `flush_telemetry/1`
-- `with_telemetry/2` and `emit_with_context/3`
-
-### Supertester.LoggerIsolation
-
-Process-scoped Logger isolation with convenience capture helpers.
-
-```elixir
-:ok = Supertester.LoggerIsolation.setup_logger_isolation()
-Supertester.LoggerIsolation.isolate_level(:debug)
-
-{log, result} =
-  Supertester.LoggerIsolation.capture_isolated(:debug, fn ->
-    Logger.debug("hello")
-    :ok
-  end)
-```
-
-Key helpers:
-
-- `setup_logger_isolation/0` and `setup_logger_isolation/1`
-- `isolate_level/1`, `restore_level/0`, `get_isolated_level/0`
-- `capture_isolated/2`, `capture_isolated!/2`, `with_level/2`, `with_level_and_capture/2`
-
-### Supertester.ETSIsolation
-
-Per-test ETS table isolation and safe injection helpers.
-
-```elixir
-:ok = Supertester.ETSIsolation.setup_ets_isolation()
-{:ok, table} = Supertester.ETSIsolation.create_isolated(:set, name: :temp_table)
-
-{:ok, restore} =
-  Supertester.ETSIsolation.inject_table(MyModule, :table_name, :temp_table)
-
-restore.()
-```
-
-Key helpers:
-
-- `setup_ets_isolation/0-2`
-- `create_isolated/1-2`, `mirror_table/1-2`
-- `inject_table/3-4`, `with_table/2-3`
-
-`inject_table/3-4` should target modules that implement `__supertester_set_table__/2`.
-The fallback path only uses pre-existing application env keys and will not create
-dynamic atoms.
-
----
-
-## OTP Testing
-
-### Supertester.OTPHelpers
-
-Core OTP testing utilities.
-
-#### setup_isolated_genserver/3
-
-Sets up an isolated GenServer with automatic cleanup.
-
-```elixir
-@spec setup_isolated_genserver(module(), String.t(), keyword()) ::
-        {:ok, pid()} | {:error, term()}
-```
-
-**Parameters**:
-- `module` - The GenServer module
-- `test_name` - Test context for unique naming (optional, default: "")
-- `opts` - Options passed to `GenServer.start_link` (optional, default: [])
-
-**Example**:
-```elixir
-{:ok, server} = setup_isolated_genserver(MyServer, "test_1")
-{:ok, server} = setup_isolated_genserver(MyServer, "test_2", init_args: [config: :test])
-```
-
-#### setup_isolated_supervisor/3
-
-Sets up an isolated Supervisor with automatic cleanup.
-
-```elixir
-@spec setup_isolated_supervisor(module(), String.t(), keyword()) ::
-        {:ok, pid()} | {:error, term()}
-```
-
-**Example**:
-```elixir
-{:ok, supervisor} = setup_isolated_supervisor(MySupervisor)
-```
-
-#### wait_for_genserver_sync/2
-
-Waits for GenServer to be responsive.
-
-```elixir
-@spec wait_for_genserver_sync(GenServer.server(), timeout()) ::
-        :ok | {:error, term()}
-```
-
-**Example**:
-```elixir
-{:ok, server} = MyServer.start_link()
-:ok = wait_for_genserver_sync(server, 5000)
-```
-
-#### wait_for_process_restart/3
-
-Waits for a process to restart after termination.
-
-```elixir
-@spec wait_for_process_restart(atom(), pid(), timeout()) ::
-        {:ok, pid()} | {:error, term()}
-```
-
-**Example**:
-```elixir
-original_pid = Process.whereis(MyServer)
-GenServer.stop(MyServer)
-{:ok, new_pid} = wait_for_process_restart(MyServer, original_pid, 1000)
-assert new_pid != original_pid
-```
-
-#### wait_for_supervisor_restart/2
-
-Waits for a supervisor tree to become ready.
-
-```elixir
-@spec wait_for_supervisor_restart(Supervisor.supervisor(), timeout()) ::
-        {:ok, pid()} | {:error, term()}
-```
-
-**Example**:
-```elixir
-{:ok, supervisor} = setup_isolated_supervisor(MySupervisor)
-{:ok, _pid} = wait_for_supervisor_restart(supervisor, 2_000)
-```
-
-#### monitor_process_lifecycle/1
-
-Returns a monitor reference for a process under test.
-
-```elixir
-@spec monitor_process_lifecycle(pid()) :: {reference(), pid()}
-```
-
-**Example**:
-```elixir
-{ref, pid} = monitor_process_lifecycle(server)
-assert is_reference(ref)
-assert is_pid(pid)
-```
-
-#### wait_for_process_death/2
-
-Waits for a process to terminate and returns the `:DOWN` reason.
-
-```elixir
-@spec wait_for_process_death(pid(), timeout()) :: {:ok, term()} | {:error, :timeout}
-```
-
-**Example**:
-```elixir
-Process.exit(server, :kill)
-{:ok, reason} = wait_for_process_death(server, 1_000)
-assert reason in [:killed, :kill]
-```
-
-#### cleanup_processes/1 and cleanup_on_exit/1
-
-Utility helpers for explicit teardown when you need custom lifecycle control.
-
-```elixir
-@spec cleanup_processes([pid()]) :: :ok
-@spec cleanup_on_exit((-> any())) :: :ok
-```
-
-### Supertester.GenServerHelpers
-
-GenServer-specific testing patterns.
-
-#### get_server_state_safely/1
-
-Safely retrieves GenServer state without crashing.
-
-```elixir
-@spec get_server_state_safely(GenServer.server()) ::
-        {:ok, term()} | {:error, term()}
-```
-
-**Example**:
-```elixir
-{:ok, state} = get_server_state_safely(server)
-assert state.counter == 5
-```
-
-#### call_with_timeout/3
-
-Makes a safe call and wraps failures in `{:error, reason}`.
-
-```elixir
-@spec call_with_timeout(GenServer.server(), term(), timeout()) ::
-        {:ok, term()} | {:error, term()}
-```
-
-**Example**:
-```elixir
-{:ok, value} = call_with_timeout(server, :value, 500)
-assert is_integer(value)
-```
-
-#### cast_and_sync/4
-
-Sends a cast and synchronizes to ensure processing.
-
-```elixir
-@spec cast_and_sync(GenServer.server(), term(), term(), keyword()) ::
-        :ok | {:ok, term()} | {:error, term()}
-```
-
-Use `strict?: true` to fail fast when the target server does not implement the sync handler.
-In non-strict mode, missing handlers return `{:error, :missing_sync_handler}`.
-If the sync call is handled and returns a reply (including `{:error, ...}` tuples), the result is
-`{:ok, reply}`.
-
-**Example**:
-```elixir
-# No more Process.sleep!
-:ok = cast_and_sync(server, {:increment, 5})
-{:ok, state} = get_server_state_safely(server)
-assert state.counter == 5
-
-# Strict mode for deterministic handler enforcement
-assert_raise ArgumentError, fn ->
-  cast_and_sync(server, {:increment, 5}, :__supertester_sync__, strict?: true)
-end
-```
-
-#### concurrent_calls/4
-
-Stress-tests GenServer with concurrent calls.
-
-```elixir
-@spec concurrent_calls(GenServer.server(), [term()], pos_integer(), keyword()) ::
-        {:ok, [map()]}
-```
-
-**Example**:
-```elixir
-{:ok, results} = concurrent_calls(server, [:increment, :decrement], 10, timeout: 20)
-
-for %{call: call, successes: successes, errors: errors} <- results do
-  IO.inspect({call, successes, errors})
-end
-```
-
-#### stress_test_server/4
-
-Runs a short stress scenario with mixed calls and casts.
-
-```elixir
-@spec stress_test_server(GenServer.server(), [term()], pos_integer(), keyword()) ::
-        {:ok, %{calls: non_neg_integer, casts: non_neg_integer, errors: non_neg_integer, duration_ms: non_neg_integer}}
-```
-
-**Example**:
-```elixir
-operations = [
-  {:call, :get_state},
-  {:cast, {:queue_job, payload()}}
-]
-
-{:ok, report} = stress_test_server(server, operations, 1_000, workers: 4)
-assert report.errors == 0
-```
-
-#### test_server_crash_recovery/2
-
-Tests GenServer crash and recovery behavior.
-
-```elixir
-@spec test_server_crash_recovery(GenServer.server(), term()) ::
-        {:ok, map()} | {:error, term()}
-```
-
-**Example**:
-```elixir
-{:ok, info} = test_server_crash_recovery(server, :test_crash)
-assert info.recovered == true
-assert info.new_pid != info.original_pid
-```
-
-#### test_invalid_messages/2
-
-Sends intentionally invalid messages and reports server behavior for each case.
-
-```elixir
-@spec test_invalid_messages(GenServer.server(), [term()]) :: {:ok, [map()]}
-```
-
-**Example**:
-```elixir
-{:ok, results} = test_invalid_messages(server, [:bad_message, {:unknown, 1}])
-assert length(results) == 2
-```
-
-### Supertester.SupervisorHelpers
-
-Supervision tree testing utilities.
-
-#### test_restart_strategy/3
-
-Tests supervisor restart strategies.
-
-```elixir
-@spec test_restart_strategy(Supervisor.supervisor(), atom(), restart_scenario()) ::
-        test_result()
-```
-
-**Strategies**: `:one_for_one`, `:one_for_all`, `:rest_for_one`
-
-**Scenarios**:
-- `{:kill_child, child_id}`
-- `{:kill_children, [child_id]}`
-
-Raises `ArgumentError` when the expected strategy does not match the runtime strategy.
-Raises `ArgumentError` when a scenario references unknown child IDs.
-Supports supervisors with tuple-based or map-based internal state shapes.
-
-**Example**:
-```elixir
-result = test_restart_strategy(supervisor, :one_for_one, {:kill_child, :worker_1})
-
-assert result.restarted == [:worker_1]
-assert result.not_restarted == [:worker_2, :worker_3]
-assert result.supervisor_alive == true
-```
-
-#### assert_supervision_tree_structure/2
-
-Verifies supervision tree matches expected structure.
-
-```elixir
-@spec assert_supervision_tree_structure(Supervisor.supervisor(), tree_structure()) :: :ok
-```
-
-When `expected` contains `:supervisor` and/or `:strategy`, both are validated.
-Leaf child entries also validate expected child modules.
-
-If `:supervisor` is provided but the runtime module cannot be determined, the assertion raises.
-
-**Example**:
-```elixir
-assert_supervision_tree_structure(root_supervisor, %{
-  supervisor: RootSupervisor,
-  strategy: :one_for_one,
-  children: [
-    {:cache, CacheServer},
-    {:worker_pool, %{
-      supervisor: WorkerPoolSupervisor,
-      strategy: :one_for_all,
-      children: [
-        {:worker_1, Worker},
-        {:worker_2, Worker}
-      ]
-    }}
-  ]
-})
-```
-
-#### trace_supervision_events/2
-
-Monitors supervisor for restart events.
-
-```elixir
-@spec trace_supervision_events(Supervisor.supervisor(), keyword()) ::
-        {:ok, (() -> [supervision_event()])}
-```
-
-**Events**:
-- `{:child_started, child_id, pid}`
-- `{:child_terminated, child_id, pid, reason}`
-- `{:child_restarted, child_id, old_pid, new_pid}`
-
-**Example**:
-```elixir
-{:ok, stop_trace} = trace_supervision_events(supervisor)
-
-# Cause failures
-Process.exit(child_pid, :kill)
-
-events = stop_trace.()
-assert Enum.any?(events, &match?({:child_restarted, _, _, _}, &1))
-```
-
-#### wait_for_supervisor_stabilization/2
-
-Waits until all children are running.
-
-```elixir
-@spec wait_for_supervisor_stabilization(Supervisor.supervisor(), timeout()) ::
-        :ok | {:error, :timeout}
-```
-
-**Example**:
-```elixir
-# Cause chaos
-Enum.each(children, fn {_id, pid, _type, _mods} ->
-  Process.exit(pid, :kill)
-end)
-
-# Wait for recovery
-:ok = wait_for_supervisor_stabilization(supervisor)
-assert_all_children_alive(supervisor)
-```
-
-#### get_active_child_count/1
-
-Returns the currently active child count for a supervisor.
-
-```elixir
-@spec get_active_child_count(Supervisor.supervisor()) :: non_neg_integer()
-```
-
-**Example**:
-```elixir
-count = get_active_child_count(supervisor)
-assert count >= 0
-```
-
----
-
-## Chaos Engineering
-
-### Supertester.ChaosHelpers
-
-Chaos engineering toolkit for resilience testing.
-
-#### inject_crash/3
-
-Injects controlled crashes into processes.
-
 ```elixir
-@spec inject_crash(pid(), crash_spec(), keyword()) :: :ok
+@spec version() :: String.t()
 ```
-
-**Crash Specifications**:
-- `:immediate` - Crash immediately
-- `{:after_ms, duration}` - Crash after delay
-- `{:random, probability}` - Crash with probability (0.0 to 1.0)
-
-**Example**:
-```elixir
-# Immediate crash
-inject_crash(worker_pid, :immediate)
-
-# Delayed crash (100ms)
-inject_crash(worker_pid, {:after_ms, 100})
-
-# Random crash (30% probability)
-inject_crash(worker_pid, {:random, 0.3}, reason: :chaos_test)
-```
-
-#### chaos_kill_children/2
-
-Randomly kills children in supervision tree.
-
-```elixir
-@spec chaos_kill_children(Supervisor.supervisor(), keyword()) :: chaos_report()
-```
-
-**Options**:
-- `:kill_rate` - Percentage of children to kill (default: 0.3)
-- `:duration_ms` - How long to run chaos (default: 5000)
-- `:kill_interval_ms` - Time between kills (default: 100)
-- `:kill_reason` - Reason for kills (default: :kill)
-
-`kill_rate: 0.0` is a valid no-kill baseline.
-The `supervisor` argument can be a pid or a registered name.
-If the supervisor crashes during chaos, the helper returns a report with
-`supervisor_crashed: true` instead of exiting the caller.
-
-**Example**:
-```elixir
-report = chaos_kill_children(supervisor,
-  kill_rate: 0.5,  # Kill 50% of children
-  duration_ms: 3000,
-  kill_interval_ms: 200
-)
-
-assert report.killed > 0
-assert report.supervisor_crashed == false
-```
-
-`report.restarted` reflects observed replacements and may be lower than `report.killed`
-(for example, with temporary children).
-Duplicate child IDs (such as `:undefined` IDs from dynamic children) are handled without
-overcounting replacements.
-
-#### simulate_resource_exhaustion/2
-
-Simulates resource limit scenarios.
-
-```elixir
-@spec simulate_resource_exhaustion(atom(), keyword()) ::
-        {:ok, cleanup_fn()} | {:error, term()}
-```
-
-**Resources**:
-- `:process_limit` - Spawn many processes
-- `:ets_tables` - Create many ETS tables
-- `:memory` - Allocate memory
-
-Non-positive `spawn_count` / `count` values are treated as an explicit no-op.
-
-**Example**:
-```elixir
-test "system handles process pressure" do
-  {:ok, cleanup} = simulate_resource_exhaustion(:process_limit,
-    spawn_count: 1000
-  )
-
-  # Test under pressure
-  result = perform_operation()
-
-  # Cleanup
-  cleanup.()
-
-  # Verify graceful degradation
-  assert match?({:ok, _} | {:error, :resource_limit}, result)
-end
-```
-
-#### assert_chaos_resilient/4
-
-Asserts system recovers from chaos.
-
-```elixir
-@spec assert_chaos_resilient(pid(), (() -> any()), (() -> boolean()), keyword()) :: :ok
-```
-
-**Example**:
-```elixir
-assert_chaos_resilient(supervisor,
-  fn -> chaos_kill_children(supervisor, kill_rate: 0.5) end,
-  fn -> all_workers_alive?(supervisor) end,
-  timeout: 10_000
-)
-```
-
-#### run_chaos_suite/3
-
-Runs comprehensive chaos scenario testing.
-
-```elixir
-@spec run_chaos_suite(pid(), [map()], keyword()) :: chaos_suite_report()
-```
-
-`opts[:timeout]` is a suite-wide deadline. Timed-out scenarios are reported as failures
-with `:timeout` / `:suite_timeout`.
-
-**Example**:
-Supports both legacy scenario maps and concurrent harness scenarios:
-
-```elixir
-scenarios = [
-  %{type: :kill_children, kill_rate: 0.3, duration_ms: 1000},
-  %{
-    type: :concurrent,
-    build: fn supervisor ->
-      Supertester.ConcurrentHarness.simple_genserver_scenario(
-        MyWorker,
-        [{:cast, :do_work}, {:call, :get_state}],
-        3,
-        setup: fn -> {:ok, supervisor, %{}} end,
-        cleanup: fn _, _ -> :ok end
-      )
-    end
-  }
-]
-
-report = run_chaos_suite(supervisor, scenarios, timeout: 30_000)
-```
-
-For concurrent scenarios you may also pass `scenario: <ConcurrentHarness scenario/map>` directly
-if no special build logic is required. Each harness run shares the same telemetry/reporting
-infrastructure as `Supertester.ConcurrentHarness`.
-
----
-
-## Performance Testing
-
-### Supertester.PerformanceHelpers
-
-Performance testing and regression detection.
-
-#### assert_performance/2
-
-Asserts operation meets performance bounds.
-
-```elixir
-@spec assert_performance((() -> any()), keyword()) :: :ok
-```
-
-**Expectations**:
-- `:max_time_ms` - Maximum execution time
-- `:max_memory_bytes` - Maximum memory consumption
-- `:max_reductions` - Maximum CPU work
-
-**Example**:
-```elixir
-test "API meets performance SLA" do
-  assert_performance(
-    fn -> API.get_user(1) end,
-    max_time_ms: 50,
-    max_memory_bytes: 1_000_000,
-    max_reductions: 100_000
-  )
-end
-```
-
-#### assert_expectations/2
-
-Validates a measurement map (typically returned by `measure_operation/1`) against the same
-expectations supported by `assert_performance/2`.
-
-```elixir
-@spec assert_expectations(map(), keyword()) :: :ok
-```
-
-Useful when you need the measured result but still want to enforce limits:
-
-```elixir
-measurement = measure_operation(fn -> run_workload() end)
-assert_expectations(measurement, max_time_ms: 50)
-assert measurement.result == :ok
-```
-
-#### assert_no_memory_leak/3
-
-Detects memory leaks over many iterations.
-
-```elixir
-@spec assert_no_memory_leak(pos_integer(), (() -> any()), keyword()) :: :ok
-```
-
-**Options**:
-- `:threshold` - Acceptable growth rate (default: 0.1 = 10%)
-
-**Example**:
-```elixir
-test "no memory leak in message handling" do
-  {:ok, worker} = setup_isolated_genserver(Worker)
-
-  assert_no_memory_leak(10_000, fn ->
-    Worker.handle_message(worker, random_message())
-  end, threshold: 0.05)
-end
-```
-
-#### measure_operation/1
-
-Measures operation performance metrics.
-
-```elixir
-@spec measure_operation((() -> any())) :: map()
-```
-
-**Returns**:
-- `:time_us` - Execution time in microseconds
-- `:memory_bytes` - Memory used
-- `:reductions` - CPU work
-- `:result` - Operation result
-
-**Example**:
-```elixir
-metrics = measure_operation(fn ->
-  expensive_calculation()
-end)
-
-IO.puts "Time: #{metrics.time_us}μs"
-IO.puts "Memory: #{metrics.memory_bytes} bytes"
-IO.puts "Reductions: #{metrics.reductions}"
-```
-
-#### measure_mailbox_growth/3
-
-Monitors mailbox size during operation.
-
-```elixir
-@spec measure_mailbox_growth(pid(), (() -> any()), keyword()) :: map()
-```
-
-**Options**:
-- `:sampling_interval` - Interval in ms between samples (default: 10)
-
-**Returns**:
-- `:initial_size` - Mailbox size before
-- `:final_size` - Mailbox size after
-- `:max_size` - Maximum observed
-- `:avg_size` - Average size
-- `:result` - Return value from the wrapped operation
-
-**Example**:
-```elixir
-report = measure_mailbox_growth(server, fn ->
-  send_many_messages(server, 1000)
-end, sampling_interval: 5)
-
-assert report.max_size < 100
-```
-
-#### assert_mailbox_stable/2
-
-Asserts mailbox doesn't grow unbounded.
-
-```elixir
-@spec assert_mailbox_stable(pid(), keyword()) :: :ok
-```
-
-**Options**:
-- `:during` - Function to execute (required)
-- `:max_size` - Maximum mailbox size (default: 100)
-- Additional options forwarded to `measure_mailbox_growth/3`
-
-**Example**:
-```elixir
-assert_mailbox_stable(server,
-  during: fn ->
-    for _ <- 1..1000 do
-      GenServer.cast(server, :work)
-    end
-  end,
-  max_size: 50
-)
-```
-
-#### compare_performance/1
-
-Compares performance of multiple functions.
-
-```elixir
-@spec compare_performance(map()) :: map()
-```
-
-**Example**:
-```elixir
-results = compare_performance(%{
-  "approach_a" => fn -> approach_a() end,
-  "approach_b" => fn -> approach_b() end,
-  "approach_c" => fn -> approach_c() end
-})
-
-# Find fastest
-fastest = Enum.min_by(results, fn {_name, m} -> m.time_us end)
-{name, metrics} = fastest
-IO.puts "Fastest: #{name} at #{metrics.time_us}μs"
-```
-
----
-
-## Assertions
-
-### Supertester.Assertions
-
-Custom OTP-aware assertions.
-
-#### assert_process_alive/1
-
-```elixir
-@spec assert_process_alive(pid()) :: :ok
-```
-
-**Example**:
-```elixir
-assert_process_alive(server_pid)
-```
-
-#### assert_process_dead/1
-
-```elixir
-@spec assert_process_dead(pid()) :: :ok
-```
-
-#### assert_process_restarted/2
-
-```elixir
-@spec assert_process_restarted(atom(), pid()) :: :ok
-```
-
-**Example**:
-```elixir
-original = Process.whereis(MyServer)
-GenServer.stop(MyServer)
-assert_process_restarted(MyServer, original)
-```
-
-#### assert_genserver_state/2
-
-Asserts GenServer has expected state.
-
-```elixir
-@spec assert_genserver_state(GenServer.server(), term() | (term() -> boolean())) :: :ok
-```
-
-**Examples**:
-```elixir
-# Exact match
-assert_genserver_state(server, %{counter: 5})
-
-# Function validation
-assert_genserver_state(server, fn state ->
-  state.counter > 0 and state.status == :active
-end)
-```
-
-#### assert_genserver_responsive/1
-
-```elixir
-@spec assert_genserver_responsive(GenServer.server()) :: :ok
-```
-
-#### assert_genserver_handles_message/3
-
-```elixir
-@spec assert_genserver_handles_message(GenServer.server(), term(), term()) :: :ok
-```
-
-**Example**:
-```elixir
-assert_genserver_handles_message(server, :get_value, 10)
-```
-
-#### assert_supervisor_strategy/2
-
-```elixir
-@spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
-```
-
-**Example**:
-```elixir
-assert_supervisor_strategy(supervisor, :one_for_one)
-```
-
-#### assert_child_count/2
-
-```elixir
-@spec assert_child_count(Supervisor.supervisor(), non_neg_integer()) :: :ok
-```
-
-**Example**:
-```elixir
-assert_child_count(supervisor, 5)
-```
-
-#### assert_all_children_alive/1
-
-```elixir
-@spec assert_all_children_alive(Supervisor.supervisor()) :: :ok
-```
-
-#### assert_no_process_leaks/1
-
-```elixir
-@spec assert_no_process_leaks((() -> any())) :: :ok
-```
-
-Detects persistent process leaks attributable to the operation caller (spawned or linked
-processes, including descendant spawn trees), reducing false positives from unrelated
-concurrent activity.
-
-**Example**:
-```elixir
-assert_no_process_leaks(fn ->
-  {:ok, temp_server} = GenServer.start_link(TempServer, [])
-  # Do work
-  GenServer.stop(temp_server)
-end)
-```
-
-#### assert_memory_usage_stable/2
-
-```elixir
-@spec assert_memory_usage_stable((() -> any()), float()) :: :ok
-```
-
-**Example**:
-```elixir
-assert_memory_usage_stable(fn ->
-  for _ <- 1..1000 do
-    GenServer.call(server, :operation)
-  end
-end, 0.05)  # 5% tolerance
-```
-
-#### assert_performance_within_bounds/2
-
-Validates benchmark result maps produced by custom measurements.
-
-```elixir
-@spec assert_performance_within_bounds(map(), map()) :: :ok
-```
-
-**Example**:
-```elixir
-metrics = %{max_time: 50, max_memory: 200_000}
-assert_performance_within_bounds(metrics, %{max_time: 100, max_memory: 500_000})
-```
-
----
-
-## Quick Reference
-
-### Common Patterns
-
-#### Pattern 1: Basic GenServer Test
-
-```elixir
-test "counter increments" do
-  {:ok, counter} = setup_isolated_genserver(Counter)
-
-  :ok = cast_and_sync(counter, :increment)
-  :ok = cast_and_sync(counter, :increment)
-
-  assert_genserver_state(counter, fn s -> s.count == 2 end)
-end
-```
-
-#### Pattern 2: Supervision Tree Test
-
-```elixir
-test "supervisor restarts failed children" do
-  {:ok, supervisor} = setup_isolated_supervisor(MySupervisor)
-
-  result = test_restart_strategy(supervisor, :one_for_one,
-    {:kill_child, :worker_1}
-  )
-
-  assert :worker_1 in result.restarted
-  wait_for_supervisor_stabilization(supervisor)
-  assert_all_children_alive(supervisor)
-end
-```
-
-#### Pattern 3: Chaos Testing
-
-```elixir
-test "system is resilient" do
-  {:ok, system} = setup_isolated_supervisor(MySystem)
-
-  report = chaos_kill_children(system,
-    kill_rate: 0.5,
-    duration_ms: 5000
-  )
-
-  assert Process.alive?(system)
-  assert report.supervisor_crashed == false
-end
-```
-
-#### Pattern 4: Performance SLA
-
-```elixir
-test "meets performance requirements" do
-  {:ok, api} = setup_isolated_genserver(APIServer)
-
-  assert_performance(
-    fn -> APIServer.critical_operation(api) end,
-    max_time_ms: 100,
-    max_memory_bytes: 1_000_000
-  )
-end
-```
-
-#### Pattern 5: Memory Leak Detection
-
-```elixir
-test "no memory leak" do
-  {:ok, worker} = setup_isolated_genserver(Worker)
-
-  assert_no_memory_leak(50_000, fn ->
-    Worker.process(worker, data())
-  end)
-end
-```
-
-#### Pattern 6: Telemetry Isolation
-
-```elixir
-use Supertester.ExUnitFoundation, telemetry_isolation: true
-
-test "telemetry is scoped to this test" do
-  {:ok, _} = Supertester.TelemetryHelpers.attach_isolated([:my, :event])
-  Supertester.TelemetryHelpers.emit_with_context([:my, :event], %{}, %{})
-  assert Supertester.TelemetryHelpers.assert_telemetry([:my, :event])
-end
-```
-
-### Import Patterns
-
-```elixir
-# Core OTP testing
-import Supertester.{OTPHelpers, GenServerHelpers, Assertions}
-
-# Supervision testing
-import Supertester.{OTPHelpers, SupervisorHelpers, Assertions}
-
-# Chaos testing
-import Supertester.{ChaosHelpers, SupervisorHelpers}
-
-# Performance testing
-import Supertester.PerformanceHelpers
-
-# Everything
-import Supertester.{
-  OTPHelpers,
-  GenServerHelpers,
-  SupervisorHelpers,
-  ChaosHelpers,
-  PerformanceHelpers,
-  Assertions
-}
-```
-
-### TestableGenServer Pattern
-
-```elixir
-# In your GenServer
-defmodule MyServer do
-  use GenServer
-  use Supertester.TestableGenServer  # Add this line
-
-  # Rest of implementation
-end
-
-# In your tests
-test "with sync" do
-  GenServer.cast(server, :async_op)
-  GenServer.call(server, :__supertester_sync__)  # Wait for processing
-  # Now safe to assert
-end
-```
-
----
-
-## Best Practices
 
-### 1. Always Use Isolation
+### `Supertester.ExUnitFoundation`
 
 ```elixir
 use Supertester.ExUnitFoundation, isolation: :full_isolation
 ```
 
-### 2. Use setup_isolated_* Functions
+Options:
+
+- `:isolation` - `:basic | :registry | :full_isolation | :contamination_detection`
+- `:telemetry_isolation`
+- `:logger_isolation`
+- `:ets_isolation`
+
+## OTP Helpers
+
+### `Supertester.OTPHelpers`
 
 ```elixir
-setup do
-  {:ok, server} = setup_isolated_genserver(MyServer)
-  {:ok, server: server}
-end
+@spec setup_isolated_genserver(module(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
+@spec setup_isolated_supervisor(module(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
+@spec wait_for_genserver_sync(GenServer.server(), timeout()) :: :ok | {:error, term()}
+@spec wait_for_process_restart(atom(), pid(), timeout()) :: {:ok, pid()} | {:error, term()}
+@spec wait_for_supervisor_restart(Supervisor.supervisor(), timeout()) :: {:ok, pid()} | {:error, term()}
+@spec monitor_process_lifecycle(pid()) :: {reference(), pid()}
+@spec wait_for_process_death(pid(), timeout()) :: {:ok, term()} | {:error, :timeout}
+@spec cleanup_processes([pid()]) :: :ok
+@spec cleanup_on_exit((-> any())) :: :ok
 ```
 
-### 3. Never Use Process.sleep
+### `Supertester.GenServerHelpers`
 
 ```elixir
-# ❌ Bad
-GenServer.cast(server, :op)
-Process.sleep(50)
-
-# ✅ Good
-cast_and_sync(server, :op)
+@spec get_server_state_safely(GenServer.server()) :: {:ok, term()} | {:error, term()}
+@spec call_with_timeout(GenServer.server(), term(), timeout()) :: {:ok, term()} | {:error, term()}
+@spec cast_and_sync(GenServer.server(), term(), term(), keyword()) :: :ok | {:ok, term()} | {:error, term()}
+@spec concurrent_calls(GenServer.server(), [term()], pos_integer(), keyword()) :: {:ok, [map()]}
+@spec stress_test_server(GenServer.server(), [term()], pos_integer(), keyword()) :: {:ok, map()}
+@spec test_server_crash_recovery(GenServer.server(), term()) :: {:ok, map()} | {:error, term()}
+@spec test_invalid_messages(GenServer.server(), [term()]) :: {:ok, [{term(), term()}]}
 ```
 
-### 4. Use Expressive Assertions
+`cast_and_sync/4` semantics:
+
+- missing sync support:
+  - `strict?: true` raises `ArgumentError`.
+  - `strict?: false` returns `{:error, :missing_sync_handler}`.
+- handled sync replies return `{:ok, reply}`.
+- covers missing-handler crashes raised as both runtime and function-clause exit shapes.
+
+### `Supertester.TestableGenServer`
+
+Injects:
+
+- `handle_call(:__supertester_sync__, ...)`
+- `handle_call({:__supertester_sync__, opts}, ...)`
+
+## Supervisor Helpers
+
+### `Supertester.SupervisorHelpers`
 
 ```elixir
-# ❌ Verbose
-state = :sys.get_state(server)
-assert state.counter == 5
-
-# ✅ Better
-assert_genserver_state(server, %{counter: 5})
-
-# ✅ Best (with validation)
-assert_genserver_state(server, fn s -> s.counter == 5 and s.status == :active end)
+@spec test_restart_strategy(Supervisor.supervisor(), atom(), restart_scenario()) :: test_result()
+@spec trace_supervision_events(Supervisor.supervisor(), keyword()) :: {:ok, (-> [supervision_event()])}
+@spec assert_supervision_tree_structure(Supervisor.supervisor(), tree_structure()) :: :ok
+@spec wait_for_supervisor_stabilization(Supervisor.supervisor(), timeout()) :: :ok | {:error, :timeout}
+@spec get_active_child_count(Supervisor.supervisor()) :: non_neg_integer()
 ```
 
-### 5. Test Resilience with Chaos
+Behavior notes:
+
+- `test_restart_strategy/3` raises on strategy mismatch and unknown scenario child IDs.
+- removed temporary children are not classified as restarted.
+
+## Chaos
+
+### `Supertester.ChaosHelpers`
 
 ```elixir
-test "system handles chaos" do
-  {:ok, system} = setup_isolated_supervisor(MySystem)
-
-  assert_chaos_resilient(system,
-    fn -> chaos_kill_children(system, kill_rate: 0.3) end,
-    fn -> system_healthy?(system) end
-  )
-end
+@spec inject_crash(pid(), crash_spec(), keyword()) :: :ok
+@spec chaos_kill_children(Supervisor.supervisor(), keyword()) :: chaos_report()
+@spec simulate_resource_exhaustion(atom(), keyword()) :: {:ok, (-> :ok)} | {:error, term()}
+@spec assert_chaos_resilient(pid(), (-> any()), (-> boolean()), keyword()) :: :ok
+@spec run_chaos_suite(pid(), [map()], keyword()) :: chaos_suite_report()
 ```
 
-### 6. Assert Performance SLAs
+Behavior notes:
+
+- `chaos_kill_children/2` accepts pid and registered supervisor names for supervisor-based scenarios.
+- `restarted` counts observed child replacements, including cascade replacements.
+- `run_chaos_suite/3`:
+  - applies suite deadline with `:timeout` and `:suite_timeout` when execution overruns.
+  - does not treat ordinary scenario failures with reason `:timeout` as suite timeout cutoffs.
+
+## Assertions
+
+### `Supertester.Assertions`
 
 ```elixir
-test "meets SLA" do
-  assert_performance(
-    fn -> critical_path() end,
-    max_time_ms: 100
-  )
-end
+@spec assert_process_alive(pid()) :: :ok
+@spec assert_process_dead(pid()) :: :ok
+@spec assert_process_restarted(atom(), pid()) :: :ok
+@spec assert_genserver_state(GenServer.server(), term() | (term() -> boolean())) :: :ok
+@spec assert_genserver_responsive(GenServer.server()) :: :ok
+@spec assert_genserver_handles_message(GenServer.server(), term(), term()) :: :ok
+@spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
+@spec assert_child_count(Supervisor.supervisor(), non_neg_integer()) :: :ok
+@spec assert_all_children_alive(Supervisor.supervisor()) :: :ok
+@spec assert_memory_usage_stable((-> any()), float()) :: :ok
+@spec assert_no_process_leaks((-> any())) :: :ok
+@spec assert_performance_within_bounds(map(), map()) :: :ok
 ```
 
----
+`assert_no_process_leaks/1`:
 
-## Testing Supertester Tests
+- traces spawned/linked descendants attributable to the operation.
+- catches delayed descendant leaks.
+- ignores short-lived transient processes.
 
-When writing tests for code that uses Supertester:
+## Performance
+
+### `Supertester.PerformanceHelpers`
 
 ```elixir
-defmodule MyApp.MyModuleTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
-
-  import Supertester.{OTPHelpers, Assertions}
-
-  describe "my functionality" do
-    test "works correctly" do
-      {:ok, server} = setup_isolated_genserver(MyModule)
-
-      # Your test logic
-      assert_genserver_responsive(server)
-    end
-  end
-end
+@spec assert_performance((-> any()), keyword()) :: :ok
+@spec assert_expectations(map(), keyword()) :: :ok
+@spec assert_no_memory_leak(pos_integer(), (-> any()), keyword()) :: :ok
+@spec measure_operation((-> any())) :: map()
+@spec measure_mailbox_growth(pid(), (-> any()), keyword()) :: map()
+@spec assert_mailbox_stable(pid(), keyword()) :: :ok
+@spec compare_performance(map()) :: map()
 ```
 
----
+## Concurrency and Diagnostics
 
-## Migration from Process.sleep
+### `Supertester.ConcurrentHarness`
 
-### Before
 ```elixir
-test "async operation" do
-  GenServer.cast(server, :operation)
-  Process.sleep(50)  # Hope this is enough!
-  assert :sys.get_state(server).done == true
-end
+@spec run(scenario()) :: {:ok, map()} | {:error, term()}
+@spec run_with_performance(scenario(), keyword()) :: {:ok, map()} | {:error, term()}
+@spec simple_genserver_scenario(module(), [term() | operation()], pos_integer(), keyword()) :: Scenario.t()
+@spec from_property_config(module(), map(), keyword()) :: Scenario.t()
+@spec chaos_kill_children(keyword()) :: chaos_fun()
+@spec chaos_inject_crash(ChaosHelpers.crash_spec(), keyword()) :: chaos_fun()
 ```
 
-### After
+### `Supertester.PropertyHelpers`
+
+StreamData-based operation/scenario generators.
+
+### `Supertester.MessageHarness`
+
 ```elixir
-test "async operation" do
-  :ok = cast_and_sync(server, :operation)
-  assert_genserver_state(server, fn s -> s.done == true end)
-end
+@spec trace_messages(pid(), (-> any()), keyword()) :: %{
+  messages: [term()],
+  result: term(),
+  initial_mailbox: [term()],
+  final_mailbox: [term()]
+}
 ```
 
----
+### `Supertester.Telemetry` and `Supertester.TelemetryHelpers`
 
-## Troubleshooting
+Telemetry namespace and per-test telemetry isolation helpers.
 
-### Q: Tests are still flaky
-**A**: Ensure you're using `cast_and_sync` instead of `GenServer.cast` + sleep
+### `Supertester.LoggerIsolation` and `Supertester.ETSIsolation`
 
-### Q: `cast_and_sync/4` returned `{:error, :missing_sync_handler}`
-**A**: The target server is missing a sync handler. Add `use Supertester.TestableGenServer`, or run with `strict?: true` and implement the handler explicitly.
-
-### Q: `cast_and_sync/4` returned `{:ok, {:error, :unknown_call}}`
-**A**: Synchronization succeeded, but your server replied with an error tuple for the sync call. Add an explicit sync handler if you want `:ok`.
-
-### Q: Name conflicts in tests
-**A**: Use `setup_isolated_genserver` which generates unique isolated names.
-
-### Q: Supervisor tests fail
-**A**: Use `wait_for_supervisor_stabilization` after causing failures
-
-### Q: Performance tests are inconsistent
-**A**: Run with `:erlang.garbage_collect()` before measurements, use sufficient iterations
-
-### Q: Chaos tests too aggressive
-**A**: Reduce `kill_rate` or `duration_ms` parameters
-
----
-
-## See Also
-
-- [Documentation Index](DOCS_INDEX.md)
-- [CHANGELOG](../CHANGELOG.md)
-- [HexDocs](https://hexdocs.pm/supertester)
-
----
-
-**Version**: 0.6.0
-**License**: MIT
-**Maintainer**: nshkrdotcom
+Per-test logger/ETS isolation helpers.

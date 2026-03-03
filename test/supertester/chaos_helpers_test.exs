@@ -122,6 +122,31 @@ defmodule Supertester.ChaosHelpersTest do
     end
   end
 
+  defmodule OneForAllSupervisor do
+    use Supervisor
+
+    def start_link(opts) do
+      Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
+    end
+
+    @impl true
+    def init(opts) do
+      worker_count = Keyword.get(opts, :workers, 3)
+
+      children =
+        for i <- 1..worker_count do
+          %{
+            id: :"worker_#{i}",
+            start:
+              {ResilientWorker, :start_link,
+               [[name: {:global, {:one_for_all_worker, self(), i, System.unique_integer()}}]]}
+          }
+        end
+
+      Supervisor.init(children, strategy: :one_for_all, max_restarts: 10, max_seconds: 5)
+    end
+  end
+
   defmodule DynamicTemporaryWorker do
     use GenServer
 
@@ -353,6 +378,21 @@ defmodule Supertester.ChaosHelpersTest do
       assert report.killed >= 1
       assert report.supervisor_crashed == true
       refute Process.alive?(supervisor)
+    end
+
+    test "restarted accounting includes one_for_all cascading replacements" do
+      {:ok, supervisor} =
+        OneForAllSupervisor.start_link(
+          workers: 3,
+          name: {:global, {:one_for_all_sup, self(), System.unique_integer()}}
+        )
+
+      report =
+        chaos_kill_children(supervisor, kill_rate: 0.34, duration_ms: 10, kill_interval_ms: 60)
+
+      assert report.killed == 1
+      assert report.restarted >= 3
+      assert report.supervisor_crashed == false
     end
   end
 
@@ -616,6 +656,31 @@ defmodule Supertester.ChaosHelpersTest do
       refute Enum.any?(report.failures, fn %{reason: reason} ->
                reason == :unknown_scenario_type
              end)
+    end
+
+    test "does not treat ordinary :timeout errors as suite timeout events" do
+      concurrent_scenario = %{
+        type: :concurrent,
+        scenario: %{
+          setup: fn -> {:error, :timeout} end,
+          threads: [[:work]],
+          cleanup: fn _, _ -> :ok end
+        }
+      }
+
+      scenarios = [
+        concurrent_scenario,
+        %{type: :invalid_type}
+      ]
+
+      report = run_chaos_suite(self(), scenarios, timeout: 1_000)
+      reasons = Enum.map(report.failures, & &1.reason)
+
+      assert report.total_scenarios == 2
+      assert report.failed == 2
+      assert :timeout in reasons
+      assert :unknown_scenario_type in reasons
+      refute :suite_timeout in reasons
     end
   end
 
