@@ -45,28 +45,7 @@ defmodule Supertester.OTPHelpers do
   @spec setup_isolated_genserver(module(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def setup_isolated_genserver(module, test_name \\ "", opts \\ []) do
-    unique_name = generate_unique_process_name(module, test_name)
-
-    server_opts =
-      case Keyword.get(opts, :name) do
-        nil -> Keyword.put(opts, :name, unique_name)
-        _existing_name -> opts
-      end
-
-    # Separate init_args from GenServer options
-    {init_args, genserver_opts} = Keyword.pop(server_opts, :init_args, [])
-
-    case safe_start(:genserver, module, init_args, genserver_opts) do
-      {:ok, pid} ->
-        track_process(%{pid: pid, name: Keyword.get(genserver_opts, :name), module: module})
-        cleanup_on_exit(fn -> stop_genserver_safely(pid) end)
-        {:ok, pid}
-
-      {:error, reason} ->
-        {:error,
-         {:start_failed,
-          build_failure_metadata(:genserver, module, genserver_opts, init_args, reason)}}
-    end
+    setup_isolated_process(:genserver, module, test_name, opts)
   end
 
   @doc """
@@ -89,27 +68,7 @@ defmodule Supertester.OTPHelpers do
   @spec setup_isolated_supervisor(module(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def setup_isolated_supervisor(module, test_name \\ "", opts \\ []) do
-    unique_name = generate_unique_process_name(module, test_name)
-
-    {init_args, base_opts} = Keyword.pop(opts, :init_args, [])
-
-    supervisor_opts =
-      case Keyword.get(base_opts, :name) do
-        nil -> Keyword.put(base_opts, :name, unique_name)
-        _existing_name -> base_opts
-      end
-
-    case safe_start(:supervisor, module, init_args, supervisor_opts) do
-      {:ok, pid} ->
-        track_process(%{pid: pid, name: Keyword.get(supervisor_opts, :name), module: module})
-        cleanup_on_exit(fn -> stop_supervisor_safely(pid) end)
-        {:ok, pid}
-
-      {:error, reason} ->
-        {:error,
-         {:start_failed,
-          build_failure_metadata(:supervisor, module, supervisor_opts, init_args, reason)}}
-    end
+    setup_isolated_process(:supervisor, module, test_name, opts)
   end
 
   @doc """
@@ -275,26 +234,76 @@ defmodule Supertester.OTPHelpers do
 
   # Private functions
 
+  defp setup_isolated_process(kind, module, test_name, opts) do
+    unique_name = generate_unique_process_name(module, test_name)
+    {init_args, start_opts} = split_start_opts(kind, opts, unique_name)
+
+    case safe_start(kind, module, init_args, start_opts) do
+      {:ok, pid} ->
+        track_process(%{pid: pid, name: Keyword.get(start_opts, :name), module: module})
+        cleanup_on_exit(fn -> stop_isolated_process(kind, pid) end)
+        {:ok, pid}
+
+      {:error, reason} ->
+        {:error,
+         {:start_failed, build_failure_metadata(kind, module, start_opts, init_args, reason)}}
+    end
+  end
+
+  defp split_start_opts(:genserver, opts, unique_name) do
+    opts
+    |> maybe_put_name(unique_name)
+    |> Keyword.pop(:init_args, [])
+  end
+
+  defp split_start_opts(:supervisor, opts, unique_name) do
+    {init_args, base_opts} = Keyword.pop(opts, :init_args, [])
+    {init_args, maybe_put_name(base_opts, unique_name)}
+  end
+
+  defp maybe_put_name(opts, unique_name) do
+    case Keyword.get(opts, :name) do
+      nil -> Keyword.put(opts, :name, unique_name)
+      _existing_name -> opts
+    end
+  end
+
+  defp stop_isolated_process(:genserver, pid), do: ProcessLifecycle.stop_genserver_safely(pid)
+  defp stop_isolated_process(:supervisor, pid), do: ProcessLifecycle.stop_supervisor_safely(pid)
+
   defp safe_start(kind, module, init_args, opts) do
-    original_flag = Process.flag(:trap_exit, true)
+    parent = self()
+    result_ref = make_ref()
 
-    result =
-      try do
-        case kind do
-          :genserver -> GenServer.start_link(module, init_args, opts)
-          :supervisor -> Supervisor.start_link(module, init_args, opts)
-        end
-      catch
-        :exit, reason -> {:error, reason}
-      after
-        if original_flag == false do
-          drain_exit_messages()
-        end
+    starter =
+      spawn(fn ->
+        result =
+          try do
+            case kind do
+              :genserver -> GenServer.start_link(module, init_args, opts)
+              :supervisor -> Supervisor.start_link(module, init_args, opts)
+            end
+          catch
+            :exit, reason -> {:error, reason}
+          end
 
-        Process.flag(:trap_exit, original_flag)
-      end
+        send(parent, {result_ref, result})
+      end)
 
-    result
+    monitor_ref = Process.monitor(starter)
+
+    receive do
+      {^result_ref, result} ->
+        Process.demonitor(monitor_ref, [:flush])
+        result
+
+      {:DOWN, ^monitor_ref, :process, ^starter, reason} ->
+        {:error, reason}
+    after
+      5_000 ->
+        Process.demonitor(monitor_ref, [:flush])
+        {:error, :start_timeout}
+    end
   end
 
   defp track_process(process_info) do
@@ -320,14 +329,6 @@ defmodule Supertester.OTPHelpers do
     case Supertester.UnifiedTestFoundation.fetch_isolation_context() do
       %Supertester.IsolationContext{tags: tags} -> tags
       _ -> %{}
-    end
-  end
-
-  defp drain_exit_messages do
-    receive do
-      {:EXIT, _pid, _reason} -> drain_exit_messages()
-    after
-      0 -> :ok
     end
   end
 
@@ -375,36 +376,6 @@ defmodule Supertester.OTPHelpers do
     |> case do
       "" -> nil
       normalized -> normalized
-    end
-  end
-
-  defp stop_genserver_safely(pid) when is_pid(pid) do
-    if Process.alive?(pid) do
-      try do
-        GenServer.stop(pid, :normal, 1000)
-      catch
-        :exit, _ ->
-          Process.exit(pid, :kill)
-      end
-    end
-  end
-
-  defp stop_supervisor_safely(pid) when is_pid(pid) do
-    if Process.alive?(pid) do
-      Enum.each(Supervisor.which_children(pid), fn
-        {_id, child_pid, _type, _modules} when is_pid(child_pid) ->
-          ProcessLifecycle.stop_process_safely(child_pid)
-
-        _ ->
-          :ok
-      end)
-
-      try do
-        Supervisor.stop(pid, :normal, 1000)
-      catch
-        :exit, _ ->
-          Process.exit(pid, :kill)
-      end
     end
   end
 

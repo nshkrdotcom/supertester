@@ -4,7 +4,13 @@ defmodule Supertester.TelemetryHelpers do
   """
 
   alias Supertester.{Env, IsolationContext, Telemetry, UnifiedTestFoundation}
-  alias Supertester.Internal.{IsolationContextStore, TelemetryBuffer}
+
+  alias Supertester.Internal.{
+    IsolationContextStore,
+    TelemetryBuffer,
+    TelemetryHandlerBuffers,
+    TelemetryMailbox
+  }
 
   @type event :: [atom()]
   @type measurements :: map()
@@ -225,7 +231,7 @@ defmodule Supertester.TelemetryHelpers do
     timeout = Keyword.get(opts, :timeout, 1000)
     test_id = get_test_id!()
 
-    case receive_matching_telemetry(event_pattern, metadata_pattern, test_id, timeout) do
+    case TelemetryMailbox.receive_matching(event_pattern, metadata_pattern, test_id, timeout) do
       {:ok, msg} ->
         msg
 
@@ -255,7 +261,7 @@ defmodule Supertester.TelemetryHelpers do
     timeout = Keyword.get(opts, :timeout, 100)
     test_id = get_test_id!()
 
-    case receive_matching_telemetry(event_pattern, nil, test_id, timeout) do
+    case TelemetryMailbox.receive_matching(event_pattern, nil, test_id, timeout) do
       {:ok, msg} ->
         raise ExUnit.AssertionError,
           message:
@@ -275,7 +281,7 @@ defmodule Supertester.TelemetryHelpers do
     timeout = Keyword.get(opts, :timeout, 1000)
     test_id = get_test_id!()
 
-    events = collect_telemetry_events(event_pattern, test_id, expected_count, timeout)
+    events = TelemetryMailbox.collect_matching(event_pattern, test_id, expected_count, timeout)
     actual_count = length(events)
 
     if actual_count != expected_count do
@@ -293,16 +299,11 @@ defmodule Supertester.TelemetryHelpers do
   """
   @spec flush_telemetry(:all | event()) :: [telemetry_message()]
   def flush_telemetry(:all) do
-    flush_telemetry_loop([])
+    TelemetryMailbox.flush_all()
   end
 
   def flush_telemetry(event_pattern) do
-    test_id = get_test_id()
-
-    flush_telemetry(:all)
-    |> Enum.filter(fn {:telemetry, event, _measurements, metadata} ->
-      matches_event?(event, event_pattern) and matches_test_id?(metadata, test_id)
-    end)
+    TelemetryMailbox.flush_matching(event_pattern, get_test_id())
   end
 
   @doc """
@@ -357,16 +358,6 @@ defmodule Supertester.TelemetryHelpers do
     end)
   end
 
-  defp flush_telemetry_loop(acc) do
-    receive do
-      {:telemetry, _, _, _} = msg ->
-        flush_telemetry_loop([msg | acc])
-    after
-      0 ->
-        Enum.reverse(acc)
-    end
-  end
-
   defp maybe_start_buffer(false), do: nil
 
   defp maybe_start_buffer(true) do
@@ -379,96 +370,36 @@ defmodule Supertester.TelemetryHelpers do
   defp track_handler_buffer(_handler_id, nil), do: :ok
 
   defp track_handler_buffer(handler_id, buffer_pid) when is_pid(buffer_pid) do
-    buffers = Process.get(@handler_buffers_key, %{})
-    Process.put(@handler_buffers_key, Map.put(buffers, handler_id, buffer_pid))
-    :ok
+    TelemetryHandlerBuffers.track(@handler_buffers_key, handler_id, buffer_pid)
   end
 
   defp fetch_handler_buffer(handler_id) do
-    Process.get(@handler_buffers_key, %{})
-    |> Map.get(handler_id)
+    TelemetryHandlerBuffers.fetch(@handler_buffers_key, handler_id)
   end
 
   defp cleanup_handler_buffer(handler_id) do
-    buffers = Process.get(@handler_buffers_key, %{})
-
-    case Map.pop(buffers, handler_id) do
-      {nil, remaining} ->
-        Process.put(@handler_buffers_key, remaining)
-        :ok
-
-      {buffer_pid, remaining} ->
-        Process.put(@handler_buffers_key, remaining)
-        TelemetryBuffer.stop(buffer_pid)
+    case TelemetryHandlerBuffers.pop(@handler_buffers_key, handler_id) do
+      nil -> :ok
+      buffer_pid -> TelemetryBuffer.stop(buffer_pid)
     end
   end
 
   defp flush_buffer_fallback(event_patterns, test_id) do
-    telemetry_messages = flush_telemetry(:all)
+    telemetry_messages = TelemetryMailbox.flush_all()
 
     {matching, unmatched} =
       Enum.split_with(telemetry_messages, fn {:telemetry, event, _measurements, metadata} ->
-        event in event_patterns and matches_test_id?(metadata, test_id)
+        event in event_patterns and message_matches_test_id?(metadata, test_id)
       end)
 
     Enum.each(unmatched, &send(self(), &1))
     matching
   end
 
-  defp receive_matching_telemetry(event_pattern, metadata_pattern, test_id, timeout) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_receive_matching(event_pattern, metadata_pattern, test_id, deadline, [])
-  end
+  defp message_matches_test_id?(_metadata, nil), do: true
 
-  defp do_receive_matching(event_pattern, metadata_pattern, test_id, deadline, stash)
-       when is_integer(deadline) do
-    remaining = deadline - System.monotonic_time(:millisecond)
-
-    if remaining <= 0 do
-      requeue_messages(stash)
-      :timeout
-    else
-      receive do
-        {:telemetry, event, _measurements, metadata} = msg ->
-          if matches_event?(event, event_pattern) and
-               matches_metadata?(metadata, metadata_pattern) and
-               matches_test_id?(metadata, test_id) do
-            requeue_messages(stash)
-            {:ok, msg}
-          else
-            do_receive_matching(event_pattern, metadata_pattern, test_id, deadline, [msg | stash])
-          end
-      after
-        remaining ->
-          requeue_messages(stash)
-          :timeout
-      end
-    end
-  end
-
-  defp requeue_messages(messages) do
-    messages
-    |> Enum.reverse()
-    |> Enum.each(&send(self(), &1))
-  end
-
-  defp matches_event?(event, pattern) when is_function(pattern, 1), do: pattern.(event)
-  defp matches_event?(event, pattern), do: event == pattern
-
-  defp matches_metadata?(_metadata, nil), do: true
-  defp matches_metadata?(metadata, pattern) when is_function(pattern, 1), do: pattern.(metadata)
-
-  defp matches_metadata?(metadata, pattern) when is_map(pattern) do
-    Enum.all?(pattern, fn {key, value} -> Map.get(metadata, key) == value end)
-  end
-
-  defp matches_metadata?(_metadata, _pattern), do: false
-
-  defp matches_test_id?(_metadata, nil), do: true
-
-  defp matches_test_id?(metadata, test_id) do
-    Map.get(metadata, :supertester_test_id) == test_id
-  end
+  defp message_matches_test_id?(metadata, test_id),
+    do: Map.get(metadata, :supertester_test_id) == test_id
 
   defp normalize_assert_args(metadata_or_opts, opts) do
     if is_list(metadata_or_opts) and Keyword.keyword?(metadata_or_opts) and opts == [] do
@@ -486,38 +417,6 @@ defmodule Supertester.TelemetryHelpers do
   defp build_assert_message(event_pattern, metadata_pattern, _test_id, timeout) do
     "Expected telemetry event #{inspect(event_pattern)} with metadata matching " <>
       "#{inspect(metadata_pattern)}, but none received within #{timeout}ms"
-  end
-
-  defp collect_telemetry_events(event_pattern, test_id, expected_count, timeout) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_collect_telemetry_events([], event_pattern, test_id, expected_count, deadline)
-  end
-
-  defp do_collect_telemetry_events(acc, _event_pattern, _test_id, expected_count, _deadline)
-       when length(acc) >= expected_count do
-    Enum.reverse(acc)
-  end
-
-  defp do_collect_telemetry_events(acc, event_pattern, test_id, expected_count, deadline) do
-    remaining = deadline - System.monotonic_time(:millisecond)
-
-    if remaining <= 0 do
-      Enum.reverse(acc)
-    else
-      case receive_matching_telemetry(event_pattern, nil, test_id, remaining) do
-        {:ok, msg} ->
-          do_collect_telemetry_events(
-            [msg | acc],
-            event_pattern,
-            test_id,
-            expected_count,
-            deadline
-          )
-
-        :timeout ->
-          Enum.reverse(acc)
-      end
-    end
   end
 
   defp emit_attached(handler_id, events, test_id) do

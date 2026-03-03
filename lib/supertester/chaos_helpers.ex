@@ -1,5 +1,6 @@
 defmodule Supertester.ChaosHelpers do
-  alias Supertester.Internal.SupervisorIntrospection
+  alias Supertester.Internal.Chaos.{ResourceExhaustion, SuiteRunner}
+  alias Supertester.Internal.{Poller, SupervisorIntrospection}
 
   @moduledoc """
   Chaos engineering toolkit for OTP resilience testing.
@@ -218,120 +219,8 @@ defmodule Supertester.ChaosHelpers do
           {:ok, cleanup_fn :: (-> :ok)} | {:error, term()}
   def simulate_resource_exhaustion(resource, opts \\ [])
 
-  def simulate_resource_exhaustion(:process_limit, opts) do
-    spawn_count = get_process_spawn_count(opts)
-    spawned = spawn_resource_processes(spawn_count)
-    cleanup_fn = build_process_cleanup_fn(spawned)
-    {:ok, cleanup_fn}
-  end
-
-  def simulate_resource_exhaustion(:ets_tables, opts) do
-    count =
-      opts
-      |> Keyword.get(:count, 50)
-      |> normalize_non_neg_count()
-
-    # Create ETS tables
-    tables =
-      if count > 0 do
-        for _ <- 1..count do
-          :ets.new(:supertester_chaos_table, [:set, :public])
-        end
-      else
-        []
-      end
-
-    cleanup_fn = fn ->
-      Enum.each(tables, fn table ->
-        try do
-          :ets.delete(table)
-        rescue
-          ArgumentError -> :ok
-        end
-      end)
-
-      :ok
-    end
-
-    {:ok, cleanup_fn}
-  end
-
-  def simulate_resource_exhaustion(:memory, opts) do
-    # Allocate memory by creating large binaries
-    size_mb = Keyword.get(opts, :size_mb, 10)
-    bytes = size_mb * 1024 * 1024
-
-    # Create a process to hold the memory
-    pid =
-      spawn(fn ->
-        # Allocate memory
-        _data = :binary.copy(<<0>>, bytes)
-
-        receive do
-          :stop -> :ok
-        after
-          # Auto-cleanup
-          60_000 -> :ok
-        end
-      end)
-
-    cleanup_fn = fn ->
-      if Process.alive?(pid) do
-        send(pid, :stop)
-      end
-
-      :ok
-    end
-
-    {:ok, cleanup_fn}
-  end
-
-  def simulate_resource_exhaustion(_resource, _opts) do
-    {:error, :unsupported_resource}
-  end
-
-  # Private helpers for simulate_resource_exhaustion/2
-  defp get_process_spawn_count(opts) do
-    case Keyword.get(opts, :spawn_count) do
-      nil ->
-        percentage = Keyword.get(opts, :percentage, 0.05)
-        max(trunc(10_000 * percentage), 0)
-
-      count ->
-        normalize_non_neg_count(count)
-    end
-  end
-
-  defp normalize_non_neg_count(value) when is_integer(value), do: max(value, 0)
-  defp normalize_non_neg_count(value) when is_float(value), do: max(trunc(value), 0)
-  defp normalize_non_neg_count(_value), do: 0
-
-  defp spawn_resource_processes(spawn_count) when spawn_count <= 0, do: []
-
-  defp spawn_resource_processes(spawn_count) do
-    for _ <- 1..spawn_count do
-      spawn(&wait_for_stop_message/0)
-    end
-  end
-
-  defp wait_for_stop_message do
-    receive do
-      :stop -> :ok
-    after
-      60_000 -> :ok
-    end
-  end
-
-  defp build_process_cleanup_fn(spawned) do
-    fn ->
-      Enum.each(spawned, &stop_if_alive/1)
-      :ok
-    end
-  end
-
-  defp stop_if_alive(pid) do
-    if Process.alive?(pid), do: send(pid, :stop)
-  end
+  def simulate_resource_exhaustion(resource, opts),
+    do: ResourceExhaustion.simulate(resource, opts)
 
   @doc """
   Asserts system recovers from chaos within timeout.
@@ -358,10 +247,7 @@ defmodule Supertester.ChaosHelpers do
     # Apply chaos
     chaos_fn.()
 
-    # Wait for recovery
-    start_time = System.monotonic_time(:millisecond)
-
-    recovered = wait_for_recovery(recovery_fn, start_time, timeout)
+    recovered = wait_for_recovery(recovery_fn, timeout)
 
     if recovered do
       :ok
@@ -402,7 +288,13 @@ defmodule Supertester.ChaosHelpers do
     start_time = System.monotonic_time(:millisecond)
 
     {completed_results, remaining_scenarios} =
-      run_chaos_scenarios(target, scenarios, start_time, timeout, [])
+      SuiteRunner.run(
+        target,
+        scenarios,
+        timeout,
+        &execute_chaos_scenario/2,
+        @scenario_timeout_marker
+      )
 
     timeout_results =
       Enum.map(remaining_scenarios, fn scenario ->
@@ -516,22 +408,13 @@ defmodule Supertester.ChaosHelpers do
     min(length(initial_pids), replacement_count)
   end
 
-  defp wait_for_recovery(recovery_fn, start_time, timeout) do
-    current_time = System.monotonic_time(:millisecond)
+  defp wait_for_recovery(recovery_fn, timeout) do
+    probe = fn -> if recovery_fn.(), do: :ok, else: :retry end
 
-    if current_time - start_time > timeout do
-      false
-    else
-      if recovery_fn.() do
-        true
-      else
-        receive do
-        after
-          50 -> :ok
-        end
-
-        wait_for_recovery(recovery_fn, start_time, timeout)
-      end
+    case Poller.until(probe, timeout, 50) do
+      :ok -> true
+      {:error, :timeout} -> false
+      {:error, _reason} -> false
     end
   end
 
@@ -577,56 +460,6 @@ defmodule Supertester.ChaosHelpers do
   end
 
   defp build_harness_input(_target, _scenario), do: {:error, :missing_concurrent_scenario}
-
-  defp run_chaos_scenarios(_target, [], _suite_start, _timeout, acc) do
-    {Enum.reverse(acc), []}
-  end
-
-  defp run_chaos_scenarios(target, [scenario | rest], suite_start, timeout, acc) do
-    case remaining_timeout_ms(suite_start, timeout) do
-      remaining when is_integer(remaining) and remaining <= 0 ->
-        {Enum.reverse(acc), [scenario | rest]}
-
-      :infinity ->
-        result = execute_chaos_scenario(target, scenario)
-        run_chaos_scenarios(target, rest, suite_start, timeout, [result | acc])
-
-      remaining ->
-        result = execute_chaos_scenario_with_timeout(target, scenario, remaining)
-
-        case result do
-          {:error, {^scenario, @scenario_timeout_marker}} ->
-            timeout_result = {:error, {scenario, :timeout}}
-            {Enum.reverse([timeout_result | acc]), rest}
-
-          _ ->
-            run_chaos_scenarios(target, rest, suite_start, timeout, [result | acc])
-        end
-    end
-  end
-
-  defp execute_chaos_scenario_with_timeout(target, scenario, timeout_ms)
-       when is_integer(timeout_ms) and timeout_ms > 0 do
-    task = Task.async(fn -> execute_chaos_scenario(target, scenario) end)
-
-    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} ->
-        result
-
-      {:exit, reason} ->
-        {:error, {scenario, reason}}
-
-      nil ->
-        {:error, {scenario, @scenario_timeout_marker}}
-    end
-  end
-
-  defp remaining_timeout_ms(_suite_start, :infinity), do: :infinity
-
-  defp remaining_timeout_ms(suite_start, timeout_ms) when is_integer(timeout_ms) do
-    elapsed = System.monotonic_time(:millisecond) - suite_start
-    max(timeout_ms - elapsed, 0)
-  end
 
   defp safe_supervisor_children(supervisor) do
     Supervisor.which_children(supervisor)

@@ -10,52 +10,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.0] - 2026-03-02
 
 ### Added
-- Added regression tests for `cast_and_sync/4` function-clause missing-sync handling, temporary-child restart reporting, `:one_for_all` cascade restart accounting, ordinary `:timeout` scenario failure handling in `run_chaos_suite/3`, and short-lived transient process handling in `assert_no_process_leaks/1`.
+- `TelemetryHelpers.detach_isolated/1` for explicit teardown of isolated telemetry handlers and associated buffers.
+- `TelemetryHelpers.flush_buffered_telemetry/1` for draining buffered telemetry events by handler ID.
+- Internal module `Supertester.Internal.Poller` — unified deadline-based polling utility replacing hand-rolled `wait_for_*_loop` patterns across the codebase.
+- Internal module `Supertester.Internal.ProcessLifecycle` — consolidated process stop/cleanup logic with `:shutdown` escalation to `:kill` and unlinking before stop.
+- Internal module `Supertester.Internal.ProcessRef` — unified name resolution for pid, atom, `{:global, _}`, and `{:via, _, _}` references.
+- Internal module `Supertester.Internal.SharedRegistry` — single shared `Registry` (`:supertester_shared_registry`) for all test process name registration, replacing per-test registries.
+- Internal module `Supertester.Internal.SupervisorIntrospection` — shared supervisor introspection utilities (`extract_supervisor_strategy`, `extract_supervisor_module`, `resolve_supervisor_pid`, `group_child_pids_by_id`) extracted from `Assertions`, `SupervisorHelpers`, and `ChaosHelpers`.
+- Internal module `Supertester.Internal.IsolationContextStore` — consolidated `maybe_update_context/1` pattern shared by `ETSIsolation`, `LoggerIsolation`, and `TelemetryHelpers`.
+- Internal module `Supertester.Internal.TelemetryBuffer` — anonymous Agent-based telemetry event buffer replacing per-process dynamically-named agents.
+- Internal module `Supertester.Internal.TelemetryHandlerBuffers` — process dictionary manager mapping handler IDs to buffer pids.
+- Internal module `Supertester.Internal.TelemetryMailbox` — extracted telemetry mailbox receive/flush/collect logic from `TelemetryHelpers`.
+- Internal module `Supertester.Internal.Chaos.ResourceExhaustion` — extracted resource exhaustion simulation logic from `ChaosHelpers`.
+- Internal module `Supertester.Internal.Chaos.SuiteRunner` — timeout-aware chaos suite execution with per-scenario deadline enforcement.
+- Internal module `Supertester.ConcurrentHarness.Runtime` — execution engine extracted from `ConcurrentHarness` (~420 lines).
+- Comprehensive test suites for `Assertions`, `ChaosHelpers` edge cases, `ConcurrentHarness` API contract stability, `ETSIsolation` cleanup behavior, and all new internal modules (`Poller`, `ProcessLifecycle`, `ProcessRef`, `SharedRegistry`, `SupervisorIntrospection`, `TelemetryBuffer`).
+- Atom safety regression tests verifying zero unbounded atom creation during isolation setup, ETS exhaustion simulation, and concurrent telemetry usage.
+- Regression tests for `cast_and_sync/4` function-clause missing-sync handling, temporary-child restart reporting, `:one_for_all` cascade restart accounting, ordinary `:timeout` scenario failure handling in `run_chaos_suite/3`, and short-lived transient process handling in `assert_no_process_leaks/1`.
 
 ### Changed
-- `GenServerHelpers.cast_and_sync/4` now treats any successful sync call reply as synchronized (including replies like `{:error, :unknown_call}`) and returns `{:ok, reply}`. Missing handlers still return `{:error, :missing_sync_handler}` in non-strict mode and raise in strict mode.
-- `SupervisorHelpers.test_restart_strategy/3` now raises `ArgumentError` when scenario child IDs are missing instead of silently returning a no-op restart report.
-- `Assertions.assert_no_process_leaks/1` now keeps spawn tracing active for a short post-operation grace window, improving detection of delayed descendant leaks.
-- README and guides refreshed for current 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, and expanded helper coverage), including corrected chaos, supervisor, and leak-detection semantics.
-- `GenServerHelpers.cast_and_sync/4` now consistently returns `{:error, :missing_sync_handler}` in non-strict mode whenever sync handling is missing (instead of returning `:ok` on alive targets).
-- `SupervisorHelpers.assert_supervision_tree_structure/2` now validates expected child modules for leaf children, not only child IDs.
-- `Assertions.assert_no_process_leaks/1` now scopes leak detection to processes spawned or linked by the operation caller, reducing async false positives.
-- `ChaosHelpers.chaos_kill_children/2` now treats `kill_rate <= 0` as a no-kill run (`killed == 0`).
-- `ETSIsolation.inject_table/3-4` fallback path now rejects dynamic atom creation and requires a safe/pre-existing env key or `__supertester_set_table__/2`.
+- **`GenServerHelpers.cast_and_sync/4`**: Non-strict mode now consistently returns `{:error, :missing_sync_handler}` instead of `:ok` when sync handling is missing. Any successful sync call reply (including `{:error, :unknown_call}`) is treated as synchronized and returns `{:ok, reply}`.
+- **`SupervisorHelpers.test_restart_strategy/3`**: Raises `ArgumentError` when scenario child IDs are missing or when the supervisor's actual strategy does not match the expected strategy.
+- **`SupervisorHelpers.assert_supervision_tree_structure/2`**: Now validates expected child modules for leaf children and optional `:supervisor`/`:strategy` keys in the expected structure.
+- **`SupervisorHelpers.wait_for_supervisor_stabilization/2`**: Now delegates to `OTPHelpers.wait_for_supervisor_restart/2` instead of `UnifiedTestFoundation.wait_for_supervision_tree_ready/2`.
+- **`Assertions.assert_supervisor_strategy/2`**: Now validates runtime supervisor strategy via `:sys.get_state/1` introspection instead of only verifying process accessibility. Handles both tuple-based (standard Supervisor) and map-based (DynamicSupervisor) internal state formats.
+- **`Assertions.assert_no_process_leaks/1`**: Uses `:erlang.trace/3` to scope leak detection to processes spawned/linked by the operation caller, with a post-operation grace window for delayed descendant detection. Replaces global `Process.list()` snapshot comparison.
+- **`ChaosHelpers.chaos_kill_children/2`**: Treats `kill_rate <= 0` as a no-kill run. Restart accounting now includes observed cascade replacements (e.g., `:one_for_all` sibling restarts).
+- **`ChaosHelpers.run_chaos_suite/3`**: Accepts `timeout:` option for suite-wide deadline enforcement. Distinguishes true deadline overruns from ordinary scenario failures with reason `:timeout`.
+- **`ChaosHelpers.simulate_resource_exhaustion/2`**: Non-positive `spawn_count`/`count` values treated as no-op instead of allocating resources via descending ranges. ETS table names use a single reusable atom instead of per-table dynamic atoms.
+- **`ETSIsolation.inject_table/3-4`**: Fallback path rejects dynamic atom creation; requires a pre-existing env key or `__supertester_set_table__/2` callback. Restore is now idempotent via injection tracking.
+- **`OTPHelpers.safe_start/4`**: Uses a spawned intermediary process for `start_link` calls instead of setting `trap_exit` on the test process, preventing side effects on ExUnit's process monitoring.
+- **`OTPHelpers` process naming**: Switched from dynamic atom creation (`String.to_atom/1`) to `{:via, Registry, {:supertester_shared_registry, ...}}` tuples for zero-atom-allocation naming. Single shared Registry replaces per-test registries.
+- **`UnifiedTestFoundation.generate_test_id/1`**: Returns a string instead of an atom.
+- **`IsolationContext.t()`**: `:name` and `:registry` fields broadened from `atom() | nil` to `term() | nil` to support `{:via, ...}` tuples.
+- **`ExUnitFoundation.__using__/1`**: Setup logic extracted to named functions (`maybe_setup_telemetry/2`, `maybe_setup_logger/3`, `maybe_setup_ets/2`) instead of being inlined in the macro.
+- **`TelemetryHelpers`**: Buffer Agent now uses `Agent.start_link` (linked) with anonymous process naming instead of `Agent.start` (unlinked) with `:global` dynamic atom names, preventing resource leaks on test crashes.
+- **`ConcurrentHarness`**: Execution engine (~420 lines) extracted to `ConcurrentHarness.Runtime`, leaving the public module as a thin delegation layer.
+- `ex_doc` dependency bumped from `~> 0.27` to `~> 0.40`.
+- `Supertester` moduledoc updated from "Multi-repository test orchestration" to "OTP-focused testing toolkit".
 
 ### Fixed
-- `ChaosHelpers.chaos_kill_children/2` no longer exits the caller when the supervisor dies mid-loop; it now returns a report with `supervisor_crashed: true`.
-- `TelemetryHelpers` buffered event capture no longer creates per-process dynamic atoms for buffer naming.
+- **`ChaosHelpers.chaos_kill_children/2`**: No longer exits the caller when the supervisor dies mid-loop; returns a report with `supervisor_crashed: true`. Now accepts registered supervisor names (atom, `{:global, _}`, `{:via, _, _}`). Handles duplicate child IDs correctly (e.g., dynamic children with `:undefined` IDs).
+- **`GenServerHelpers.cast_and_sync/4`**: Recognizes missing sync handlers when the server crashes with a `FunctionClauseError` exit shape. Returns `{:error, :missing_sync_handler}` in non-strict mode when sync probing reveals a missing handler via process exit. Documentation now correctly distinguishes bare `:ok` return from `{:ok, reply}` return.
+- **`SupervisorHelpers.test_restart_strategy/3`**: No longer misclassifies removed temporary children as restarted. Enforces expected strategy/module checks including map-based supervisor internals (`DynamicSupervisor`).
+- **`Assertions.assert_no_process_leaks/1`**: Corrected `:spawned` trace handling; improved persistence checks to reduce false positives from unrelated/self trace events while preserving delayed-descendant leak detection.
+- **`TelemetryHelpers`** buffered event capture no longer creates per-process dynamic atoms for buffer naming. Buffer Agent no longer leaks when test process crashes (now linked to caller).
 - Isolation and helper naming paths no longer rely on unbounded dynamic atom creation (`test_id` is string-based; shared registry/process naming are atom-safe).
-- `GenServerHelpers.cast_and_sync/4` now returns `{:error, :missing_sync_handler}` in non-strict mode when sync probing reveals a missing handler via process exit.
-- `SupervisorHelpers.test_restart_strategy/3` and `assert_supervision_tree_structure/2` now enforce expected strategy/module checks more strictly, including map-based supervisor internals (`DynamicSupervisor`).
-- `Assertions.assert_supervisor_strategy/2` now validates runtime supervisor strategy instead of only process accessibility.
-- `ChaosHelpers.chaos_kill_children/2` now accepts registered supervisor names (atom, `{:global, _}`, `{:via, _, _}`) in addition to pid inputs.
-- `ChaosHelpers.chaos_kill_children/2` now reports observed child replacements for `restarted`, handles duplicate child IDs correctly (for example, dynamic children with `:undefined` IDs), and `run_chaos_suite/3` enforces suite-wide timeout semantics.
-- `ChaosHelpers.simulate_resource_exhaustion/2` now treats non-positive `spawn_count` / `count` values as no-op requests instead of allocating resources via descending ranges.
-- `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately, traces spawned descendant trees, and reports persistent leaks with lower false-positive noise.
-- Updated version assertion test to `0.6.0`.
-- Refactored `GenServerHelpers.concurrent_calls/4` internals to satisfy strict Credo nesting limits without behavior changes.
-- `GenServerHelpers.cast_and_sync/4` now recognizes missing sync handlers when the server crashes with a `FunctionClauseError` exit shape, keeping strict/non-strict behavior consistent.
-- `SupervisorHelpers.test_restart_strategy/3` no longer misclassifies removed temporary children as restarted.
-- `ChaosHelpers.chaos_kill_children/2` restart accounting now includes observed cascade replacements (for example, `:one_for_all` sibling restarts), not only directly killed child replacements.
-- `ChaosHelpers.run_chaos_suite/3` now distinguishes true per-scenario deadline overruns from ordinary scenario failures with reason `:timeout`; only actual deadline overruns trigger suite cutoff semantics.
-- `Assertions.assert_no_process_leaks/1` corrected `:spawned` trace handling and improved persistence checks to reduce false positives from unrelated/self trace events while preserving delayed-descendant leak detection.
-
-- Extracted shared supervisor introspection utilities (`extract_supervisor_strategy`, `resolve_supervisor_pid`, `group_child_pids_by_id`) into `Supertester.Internal.SupervisorIntrospection`, eliminating code duplication across `Assertions`, `SupervisorHelpers`, and `ChaosHelpers`.
-- Process naming in `OTPHelpers` and `TelemetryHelpers` switched from `{:global, ...}` to `{:via, Registry, {:supertester_shared_registry, ...}}` for lighter-weight single-node operation.
-- `TelemetryHelpers` buffer Agent now uses `Agent.start_link` (linked) and Registry-based naming instead of `Agent.start` (unlinked) with `:global` naming, preventing resource leaks on test crashes.
-- `Assertions.extract_supervisor_strategy/1` now handles both tuple-based (standard Supervisor) and map-based (DynamicSupervisor) internal state formats.
-
-### Fixed
-- `cast_and_sync/4` documentation behavioral notes now correctly distinguish bare `:ok` return (when sync handler replies `:ok`) from `{:ok, reply}` return (when sync handler replies with other values).
-- Telemetry buffer Agent no longer leaks when test process crashes (now linked to caller).
+- `ProcessLifecycle.stop_process_safely/2` uses `:shutdown` instead of `:normal` exit reason and unlinks before stopping to prevent exit propagation to the test process.
+- `ProcessRef.resolve/1` normalizes `:undefined` from `:global.whereis_name` and `module.whereis_name` to `nil` instead of leaking the `:undefined` atom.
+- `UnifiedTestFoundation.supervisor_ready_probe/1` now rescues/catches exits instead of crashing the poller.
+- ETS injection restore is now idempotent — duplicate restore calls are tracked and skipped via injection IDs.
 - Shared registry is unlinked from creator to survive when spawned from short-lived Task processes.
+- Refactored `GenServerHelpers.concurrent_calls/4` internals to satisfy strict Credo nesting limits.
 
 ### Documentation
-- Documentation refreshed with corrected `cast_and_sync/4` return value semantics across README, QUICK_START, MANUAL, and API_GUIDE.
+- README and guides refreshed for 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, expanded helper coverage).
+- `cast_and_sync/4` return value semantics corrected across README, QUICK_START, MANUAL, and API_GUIDE.
 - Restored onboarding content: prerequisites (TestableGenServer), common patterns, and troubleshooting sections added to QUICK_START and MANUAL.
 - `Supertester.Env` documented in API_GUIDE and MANUAL with behaviour spec and custom implementation example.
+- Added `skip_code_autolink_to` for `Supertester.Env.ExUnit` and `Supertester.Internal.SupervisorIntrospection` to fix docs build warnings.
 - Added migration guide for upgrading from 0.5.1 to 0.6.0.
 
 ### Migration from 0.5.1
@@ -64,13 +77,19 @@ If upgrading from 0.5.x to 0.6.0, note the following breaking changes:
 
 1. **`cast_and_sync/4` missing-sync behavior**: Non-strict mode now consistently returns `{:error, :missing_sync_handler}` instead of `:ok` for servers without sync handlers. Update assertions that matched bare `:ok` for servers without sync support.
 
-2. **`test_restart_strategy/3` raises on missing children**: Scenario child IDs that do not exist in the supervisor now raise `ArgumentError`. Ensure all scenario child IDs match actual supervisor children.
+2. **`test_restart_strategy/3` raises on missing children and strategy mismatch**: Scenario child IDs that do not exist in the supervisor now raise `ArgumentError`. The supervisor's actual strategy must also match the expected strategy. Ensure all scenario child IDs match actual supervisor children.
 
 3. **`assert_supervision_tree_structure/2` validates child modules**: Leaf children now have their modules checked. Tests that only validated child IDs may need updating.
 
 4. **`ETSIsolation.inject_table/3-4` atom safety**: Fallback path no longer creates dynamic atoms. Use `__supertester_set_table__/2` callback or pre-existing env keys.
 
 5. **Process naming format**: Process names generated by `setup_isolated_genserver/3` and `setup_isolated_supervisor/3` use `{:via, Registry, {:supertester_shared_registry, ...}}` instead of `{:global, ...}` tuples. Code that pattern-matches on the exact name structure must be updated.
+
+6. **`generate_test_id/1` returns a string**: Test IDs are now strings, not atoms. Code using `is_atom(test_id)` or `Atom.to_string(test_id)` must be updated to use `to_string/1` or match on strings.
+
+7. **`safe_start/4` no longer sets `trap_exit` on the test process**: The function now uses a spawned intermediary. Tests relying on the side effect of `trap_exit` being set must trap exits explicitly.
+
+8. **`wait_for_supervisor_stabilization/2` delegation changed**: Now delegates to `OTPHelpers.wait_for_supervisor_restart/2` rather than `UnifiedTestFoundation.wait_for_supervision_tree_ready/2`.
 
 ## [0.5.1] - 2026-01-09
 

@@ -25,6 +25,32 @@ defmodule Supertester.ETSIsolationTest do
     def table_name, do: :supertester_default_table
   end
 
+  defmodule StrictInjectedTableModule do
+    @default_table :supertester_default_table
+
+    def table_name do
+      Process.get({__MODULE__, :table_override}, @default_table)
+    end
+
+    def __supertester_set_table__(:table_name, table_ref) do
+      key = {__MODULE__, :last_assigned_table}
+
+      if Process.get(key) == table_ref do
+        raise "duplicate table assignment #{inspect(table_ref)}"
+      end
+
+      Process.put(key, table_ref)
+
+      if table_ref == @default_table do
+        Process.delete({__MODULE__, :table_override})
+      else
+        Process.put({__MODULE__, :table_override}, table_ref)
+      end
+
+      :ok
+    end
+  end
+
   defp unique_table_name(prefix) do
     :"#{prefix}_#{System.unique_integer([:positive])}"
   end
@@ -202,6 +228,24 @@ defmodule Supertester.ETSIsolationTest do
   end
 
   describe "table injection cleanup behavior" do
+    test "restore function is idempotent" do
+      ETSIsolation.setup_ets_isolation()
+      replacement = unique_table_name("strict_replacement")
+
+      {:ok, restore} =
+        ETSIsolation.inject_table(StrictInjectedTableModule, :table_name, replacement,
+          table_opts: [:set, :public, :named_table]
+        )
+
+      assert StrictInjectedTableModule.table_name() == replacement
+      assert :ok = restore.()
+      assert StrictInjectedTableModule.table_name() == :supertester_default_table
+
+      assert :ok = restore.()
+      assert StrictInjectedTableModule.table_name() == :supertester_default_table
+      assert :ets.info(replacement) == :undefined
+    end
+
     test "cleanup does not delete externally managed tables when create is false" do
       parent = self()
 

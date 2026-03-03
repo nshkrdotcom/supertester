@@ -78,6 +78,14 @@ defmodule Supertester.OTPHelpersTest do
     assert info.reason == :bad_config
   end
 
+  test "setup_isolated_genserver does not drain unrelated EXIT mailbox messages" do
+    synthetic_exit = {:EXIT, self(), :synthetic}
+    send(self(), synthetic_exit)
+
+    assert {:ok, _pid} = setup_isolated_genserver(NamedServer, "mailbox_integrity")
+    assert_receive ^synthetic_exit
+  end
+
   test "setup_isolated_supervisor propagates init errors with context" do
     assert {:error, {:start_failed, info}} = setup_isolated_supervisor(FailingSupervisor)
     assert info.module == FailingSupervisor

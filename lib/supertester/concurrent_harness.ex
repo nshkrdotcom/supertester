@@ -29,6 +29,7 @@ defmodule Supertester.ConcurrentHarness do
 
   alias Supertester.{ChaosHelpers, PerformanceHelpers}
   alias Supertester.ConcurrentHarness.Runtime
+  alias Supertester.Internal.ProcessLifecycle
 
   @type operation :: {:call, term()} | {:cast, term()} | {:custom, (pid() -> any())}
   @type thread_script :: [operation()]
@@ -208,7 +209,7 @@ defmodule Supertester.ConcurrentHarness do
     cleanup_fun =
       case Keyword.get(opts, :cleanup) do
         fun when is_function(fun, 2) -> fun
-        nil -> &default_cleanup/2
+        nil -> &ProcessLifecycle.default_cleanup/2
       end
 
     threads =
@@ -243,7 +244,10 @@ defmodule Supertester.ConcurrentHarness do
         setup:
           Map.get(config, :setup) || Keyword.get(opts, :setup) ||
             fn -> module.start_link(Keyword.get(opts, :server_opts, [])) end,
-        cleanup: Map.get(config, :cleanup) || Keyword.get(opts, :cleanup) || (&default_cleanup/2),
+        cleanup:
+          Map.get(config, :cleanup) ||
+            Keyword.get(opts, :cleanup) ||
+            (&ProcessLifecycle.default_cleanup/2),
         threads: Map.fetch!(config, :thread_scripts),
         timeout_ms: Map.get(config, :timeout_ms, Keyword.get(opts, :timeout_ms, 5_000)),
         call_timeout_ms:
@@ -295,18 +299,6 @@ defmodule Supertester.ConcurrentHarness do
 
   def normalize_operation(term, _default) do
     raise ArgumentError, "unsupported operation #{inspect(term)}"
-  end
-
-  defp default_cleanup(subject, _ctx) do
-    if is_pid(subject) and Process.alive?(subject) do
-      try do
-        GenServer.stop(subject)
-      catch
-        :exit, _ -> :ok
-      end
-    end
-
-    :ok
   end
 
   defp execute(%Scenario{} = scenario), do: Runtime.execute(scenario)

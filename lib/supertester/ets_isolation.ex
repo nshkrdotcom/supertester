@@ -48,6 +48,7 @@ defmodule Supertester.ETSIsolation do
   @ets_mirrors_key :supertester_ets_mirrors
   @ets_injections_key :supertester_ets_injections
   @ets_cleanup_injections_key :supertester_ets_cleanup_injections
+  @ets_restored_injections_key :supertester_ets_restored_injections
 
   @doc """
   Initialize ETS isolation for the current process.
@@ -59,6 +60,7 @@ defmodule Supertester.ETSIsolation do
     Process.put(@ets_mirrors_key, %{})
     Process.put(@ets_injections_key, [])
     Process.put(@ets_cleanup_injections_key, [])
+    Process.put(@ets_restored_injections_key, %{})
 
     Env.on_exit(fn ->
       cleanup_all_tables()
@@ -209,16 +211,16 @@ defmodule Supertester.ETSIsolation do
 
     original = get_module_table_ref(module, function_or_attribute)
     injection = {module, function_or_attribute, original, replacement_table}
-    register_injection(injection, cleanup: cleanup, delete_on_cleanup: create)
+    injection_id = register_injection(injection, cleanup: cleanup, delete_on_cleanup: create)
 
     set_module_table_ref(module, function_or_attribute, replacement_table)
 
     restore_fn = fn ->
-      set_module_table_ref(module, function_or_attribute, original)
-
-      if create do
-        safe_delete_table(replacement_table)
-      end
+      _deleted =
+        restore_injection(injection_id, injection,
+          delete_on_cleanup?: create,
+          remove_cleanup_entry?: true
+        )
 
       :ok
     end
@@ -327,19 +329,22 @@ defmodule Supertester.ETSIsolation do
   defp register_injection(injection, opts) do
     cleanup? = Keyword.get(opts, :cleanup, true)
     delete_on_cleanup? = Keyword.get(opts, :delete_on_cleanup, true)
+    injection_id = make_ref()
 
     injections = Process.get(@ets_injections_key, [])
     Process.put(@ets_injections_key, [injection | injections])
 
     if cleanup? do
       cleanup_injections = Process.get(@ets_cleanup_injections_key, [])
-      cleanup_item = {injection, delete_on_cleanup?}
+      cleanup_item = {injection_id, injection, delete_on_cleanup?}
       Process.put(@ets_cleanup_injections_key, [cleanup_item | cleanup_injections])
     end
 
     IsolationContextStore.update(fn ctx ->
       %{ctx | ets_injections: [injection | ctx.ets_injections]}
     end)
+
+    injection_id
   end
 
   defp cleanup_all_tables do
@@ -354,6 +359,7 @@ defmodule Supertester.ETSIsolation do
     Process.delete(@ets_mirrors_key)
     Process.delete(@ets_injections_key)
     Process.delete(@ets_cleanup_injections_key)
+    Process.delete(@ets_restored_injections_key)
 
     emit_cleanup_complete(deleted_count + deleted_injections)
     :ok
@@ -361,23 +367,76 @@ defmodule Supertester.ETSIsolation do
 
   defp cleanup_injections(injections) do
     Enum.reduce(injections, 0, fn
+      {injection_id, injection, delete_on_cleanup?}, acc ->
+        acc +
+          restore_injection(injection_id, injection,
+            delete_on_cleanup?: delete_on_cleanup?,
+            remove_cleanup_entry?: false
+          )
+
       {{module, attr, original, replacement}, delete_on_cleanup?}, acc ->
-        set_module_table_ref(module, attr, original)
+        # Backwards-compatible path for older cleanup entries from already-running tests.
+        legacy_id = make_ref()
+        injection = {module, attr, original, replacement}
 
-        deleted =
-          if delete_on_cleanup? and safe_delete_table(replacement) do
-            1
-          else
-            0
-          end
-
-        acc + deleted
+        acc +
+          restore_injection(legacy_id, injection,
+            delete_on_cleanup?: delete_on_cleanup?,
+            remove_cleanup_entry?: false
+          )
 
       {module, attr, original, replacement}, acc ->
-        # Backwards-compatible path for older injection entries.
-        set_module_table_ref(module, attr, original)
-        acc + if(safe_delete_table(replacement), do: 1, else: 0)
+        # Backwards-compatible path for older injection entries from already-running tests.
+        legacy_id = make_ref()
+        injection = {module, attr, original, replacement}
+
+        acc +
+          restore_injection(legacy_id, injection,
+            delete_on_cleanup?: true,
+            remove_cleanup_entry?: false
+          )
     end)
+  end
+
+  defp restore_injection(injection_id, {module, attr, original, replacement}, opts) do
+    delete_on_cleanup? = Keyword.get(opts, :delete_on_cleanup?, true)
+    remove_cleanup_entry? = Keyword.get(opts, :remove_cleanup_entry?, true)
+
+    restored =
+      Process.get(@ets_restored_injections_key, %{})
+
+    if Map.has_key?(restored, injection_id) do
+      0
+    else
+      set_module_table_ref(module, attr, original)
+
+      deleted_count =
+        if delete_on_cleanup? and safe_delete_table(replacement) do
+          1
+        else
+          0
+        end
+
+      Process.put(@ets_restored_injections_key, Map.put(restored, injection_id, true))
+
+      if remove_cleanup_entry? do
+        remove_cleanup_injection(injection_id)
+      end
+
+      deleted_count
+    end
+  end
+
+  defp remove_cleanup_injection(injection_id) do
+    cleanup_injections = Process.get(@ets_cleanup_injections_key, [])
+
+    remaining =
+      Enum.reject(cleanup_injections, fn
+        {id, _injection, _delete_on_cleanup?} -> id == injection_id
+        _ -> false
+      end)
+
+    Process.put(@ets_cleanup_injections_key, remaining)
   end
 
   defp count_deleted_tables(tables) do

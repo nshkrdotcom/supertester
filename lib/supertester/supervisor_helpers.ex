@@ -331,7 +331,7 @@ defmodule Supertester.SupervisorHelpers do
   @spec wait_for_supervisor_stabilization(Supervisor.supervisor(), timeout()) ::
           :ok | {:error, :timeout}
   def wait_for_supervisor_stabilization(supervisor, timeout \\ 5000) do
-    case Supertester.UnifiedTestFoundation.wait_for_supervision_tree_ready(supervisor, timeout) do
+    case Supertester.OTPHelpers.wait_for_supervisor_restart(supervisor, timeout) do
       {:ok, _} -> :ok
       error -> error
     end

@@ -3,6 +3,7 @@ defmodule Supertester.ConcurrentHarness.Runtime do
 
   alias Supertester.{ConcurrentHarness, GenServerHelpers, PerformanceHelpers, Telemetry}
   alias Supertester.ConcurrentHarness.Scenario
+  alias Supertester.Internal.ProcessLifecycle
 
   @spec execute(Scenario.t()) :: {:ok, map()} | {:error, term()}
   def execute(%Scenario{} = scenario) do
@@ -17,7 +18,11 @@ defmodule Supertester.ConcurrentHarness.Runtime do
           run_result = run_scenario(scenario, subject, setup_ctx, metadata, start_ms)
 
           cleanup_result =
-            safe_cleanup(subject, setup_ctx, scenario.cleanup || (&default_cleanup/2))
+            safe_cleanup(
+              subject,
+              setup_ctx,
+              scenario.cleanup || (&ProcessLifecycle.default_cleanup/2)
+            )
 
           merge_result_with_cleanup(run_result, cleanup_result)
 
@@ -411,17 +416,5 @@ defmodule Supertester.ConcurrentHarness.Runtime do
           Map.put(metadata, :error, reason)
         )
     end
-  end
-
-  defp default_cleanup(subject, _ctx) do
-    if is_pid(subject) and Process.alive?(subject) do
-      try do
-        GenServer.stop(subject)
-      catch
-        :exit, _ -> :ok
-      end
-    end
-
-    :ok
   end
 end
