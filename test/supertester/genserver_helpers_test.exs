@@ -45,9 +45,25 @@ defmodule Supertester.GenServerHelpersTest do
     def handle_cast(:ping, state), do: {:noreply, state}
   end
 
+  defmodule UnknownCallServer do
+    use GenServer
+
+    def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, %{}, opts)
+
+    @impl true
+    def init(state), do: {:ok, state}
+
+    @impl true
+    def handle_cast(:ping, state), do: {:noreply, state}
+
+    @impl true
+    def handle_call(_message, _from, state), do: {:reply, {:error, :unknown_call}, state}
+  end
+
   setup do
     {:ok, no_sync} = start_supervised(NoSyncServer)
-    %{no_sync: no_sync}
+    {:ok, unknown_call} = start_supervised(UnknownCallServer)
+    %{no_sync: no_sync, unknown_call: unknown_call}
   end
 
   test "cast_and_sync raises when strict option is enabled", %{no_sync: server} do
@@ -61,6 +77,15 @@ defmodule Supertester.GenServerHelpersTest do
              cast_and_sync(server, :ping, :__supertester_sync__, strict?: false)
 
     refute Process.alive?(server)
+  end
+
+  test "cast_and_sync non-strict mode does not report success for unknown sync replies", %{
+    unknown_call: server
+  } do
+    assert {:error, :missing_sync_handler} =
+             cast_and_sync(server, :ping, :__supertester_sync__, strict?: false)
+
+    assert Process.alive?(server)
   end
 
   test "concurrent_calls returns structured successes and errors" do

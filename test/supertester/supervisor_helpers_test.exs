@@ -27,6 +27,17 @@ defmodule Supertester.SupervisorHelpersTest do
     end
   end
 
+  defmodule OtherWorker do
+    use GenServer
+
+    def start_link(opts) do
+      GenServer.start_link(__MODULE__, opts, opts)
+    end
+
+    @impl true
+    def init(state), do: {:ok, state}
+  end
+
   defmodule TestSupervisor do
     use Supervisor
 
@@ -214,6 +225,20 @@ defmodule Supertester.SupervisorHelpersTest do
           strategy: :one_for_one,
           children: [
             {:worker_1, Worker}
+          ]
+        })
+      end
+    end
+
+    test "raises when expected child module does not match actual child module" do
+      {:ok, supervisor} = TestSupervisor.start_link(strategy: :one_for_one, children: 1)
+
+      assert_raise RuntimeError, ~r/Expected child :worker_1 to use module/, fn ->
+        assert_supervision_tree_structure(supervisor, %{
+          supervisor: TestSupervisor,
+          strategy: :one_for_one,
+          children: [
+            {:worker_1, OtherWorker}
           ]
         })
       end

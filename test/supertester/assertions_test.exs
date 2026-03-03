@@ -55,4 +55,60 @@ defmodule Supertester.AssertionsTest do
       end
     end
   end
+
+  test "assert_no_process_leaks ignores unrelated concurrent processes" do
+    parent = self()
+
+    controller =
+      spawn(fn ->
+        receive do
+          {:schedule_spawn, delay_ms} ->
+            Process.send_after(self(), :spawn_unrelated, delay_ms)
+
+            receive do
+              :spawn_unrelated ->
+                unrelated =
+                  spawn(fn ->
+                    receive do
+                      :stop -> :ok
+                    after
+                      1000 -> :ok
+                    end
+                  end)
+
+                send(parent, {:unrelated_started, unrelated})
+
+                receive do
+                  :stop -> send(unrelated, :stop)
+                after
+                  1500 -> :ok
+                end
+            end
+        end
+      end)
+
+    send(controller, {:schedule_spawn, 5})
+
+    try do
+      assert :ok =
+               assert_no_process_leaks(fn ->
+                 receive do
+                 after
+                   40 -> :ok
+                 end
+               end)
+    after
+      send(controller, :stop)
+
+      receive do
+        {:unrelated_started, pid} when is_pid(pid) ->
+          if Process.alive?(pid) do
+            send(pid, :stop)
+          end
+      after
+        100 ->
+          :ok
+      end
+    end
+  end
 end

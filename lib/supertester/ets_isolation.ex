@@ -387,10 +387,31 @@ defmodule Supertester.ETSIsolation do
     if function_exported?(module, :__supertester_set_table__, 2) do
       module.__supertester_set_table__(function_name, table)
     else
-      app = Application.get_application(module)
-      key = :"#{module}_#{function_name}"
+      app = application_for_module!(module)
+      key = existing_fallback_env_key!(module, function_name)
       Application.put_env(app, key, table)
     end
+  end
+
+  defp application_for_module!(module) do
+    case Application.get_application(module) do
+      nil ->
+        raise ArgumentError,
+              "Cannot inject table for #{inspect(module)} because it is not part of a loaded OTP application and does not implement __supertester_set_table__/2"
+
+      app ->
+        app
+    end
+  end
+
+  defp existing_fallback_env_key!(module, function_name) do
+    key = "#{module}_#{function_name}"
+
+    :erlang.binary_to_existing_atom(key, :utf8)
+  catch
+    :error, :badarg ->
+      raise ArgumentError,
+            "Cannot inject table for #{inspect(module)}.#{function_name}/0 without __supertester_set_table__/2 because this would require creating a dynamic atom"
   end
 
   defp maybe_update_context(fun) do

@@ -1,6 +1,6 @@
 # Supertester API Guide
 **Version**: 0.6.0
-**Last Updated**: March 2, 2026
+**Last Updated**: March 3, 2026
 
 Reference guide for the primary Supertester modules and workflows.
 
@@ -374,6 +374,10 @@ Key helpers:
 - `create_isolated/1-2`, `mirror_table/1-2`
 - `inject_table/3-4`, `with_table/2-3`
 
+`inject_table/3-4` should target modules that implement `__supertester_set_table__/2`.
+The fallback path only uses pre-existing application env keys and will not create
+dynamic atoms.
+
 ---
 
 ## OTP Testing
@@ -546,8 +550,7 @@ Sends a cast and synchronizes to ensure processing.
 ```
 
 Use `strict?: true` to fail fast when the target server does not implement the sync handler.
-In non-strict mode, missing handlers can return `{:error, :missing_sync_handler}` if the
-target dies while processing the sync probe.
+In non-strict mode, missing handlers return `{:error, :missing_sync_handler}`.
 
 **Example**:
 ```elixir
@@ -669,6 +672,7 @@ Verifies supervision tree matches expected structure.
 ```
 
 When `expected` contains `:supervisor` and/or `:strategy`, both are validated.
+Leaf child entries also validate expected child modules.
 
 **Example**:
 ```elixir
@@ -795,6 +799,8 @@ Randomly kills children in supervision tree.
 - `:duration_ms` - How long to run chaos (default: 5000)
 - `:kill_interval_ms` - Time between kills (default: 100)
 - `:kill_reason` - Reason for kills (default: :kill)
+
+`kill_rate: 0.0` is a valid no-kill baseline.
 
 **Example**:
 ```elixir
@@ -1177,6 +1183,9 @@ assert_child_count(supervisor, 5)
 @spec assert_no_process_leaks((() -> any())) :: :ok
 ```
 
+Detects persistent process leaks attributable to the operation caller (spawned or linked
+processes), reducing false positives from unrelated concurrent activity.
+
 **Example**:
 ```elixir
 assert_no_process_leaks(fn ->
@@ -1469,7 +1478,7 @@ end
 **A**: Ensure you're using `cast_and_sync` instead of `GenServer.cast` + sleep
 
 ### Q: `cast_and_sync/4` returned `{:error, :missing_sync_handler}`
-**A**: Add `use Supertester.TestableGenServer` to the target server, or run with `strict?: true` and implement the sync handler.
+**A**: The target server is missing a sync handler. Add `use Supertester.TestableGenServer`, or run with `strict?: true` and implement the handler explicitly.
 
 ### Q: Name conflicts in tests
 **A**: Use `setup_isolated_genserver` which generates unique isolated names.

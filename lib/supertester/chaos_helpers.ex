@@ -446,7 +446,12 @@ defmodule Supertester.ChaosHelpers do
   end
 
   defp kill_random_children(children, kill_rate, kill_reason) do
-    kill_count = max(1, trunc(length(children) * kill_rate))
+    kill_count =
+      if children == [] or kill_rate <= 0 do
+        0
+      else
+        min(length(children), max(1, trunc(length(children) * kill_rate)))
+      end
 
     # Randomly select children to kill
     to_kill =

@@ -248,10 +248,26 @@ defmodule Supertester.SupervisorHelpers do
     assert_supervision_tree_structure(child_pid, nested_structure)
   end
 
-  defp assert_expected_child({child_id, _module}, children) do
-    unless Enum.any?(children, fn {id, _pid, _type, _mods} -> id == child_id end) do
-      raise "Expected child #{inspect(child_id)} not found in supervisor"
+  defp assert_expected_child({child_id, expected_module}, children) do
+    case Enum.find(children, fn {id, _pid, _type, _mods} -> id == child_id end) do
+      nil ->
+        raise "Expected child #{inspect(child_id)} not found in supervisor"
+
+      {_id, _pid, _type, mods} ->
+        unless expected_child_module?(mods, expected_module) do
+          raise """
+          Expected child #{inspect(child_id)} to use module #{inspect(expected_module)}, got #{inspect(mods)}
+          """
+        end
     end
+  end
+
+  defp expected_child_module?(mods, expected_module) when is_list(mods) do
+    Enum.member?(mods, expected_module)
+  end
+
+  defp expected_child_module?(mods, expected_module) do
+    mods == expected_module
   end
 
   defp detect_restart_events(initial_children, current_children) do

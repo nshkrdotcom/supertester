@@ -99,9 +99,9 @@ end
 ## Behavior Notes
 
 - `cast_and_sync/4` with `strict?: true` raises on missing sync handler.
-- In non-strict mode, missing handlers can return `{:error, :missing_sync_handler}` when the probe causes target exit.
+- In non-strict mode, missing sync handlers return `{:error, :missing_sync_handler}` (never `:ok`).
 - `test_restart_strategy/3` validates expected strategy and raises on mismatch.
-- `assert_supervision_tree_structure/2` validates `:supervisor` and `:strategy` when provided.
+- `assert_supervision_tree_structure/2` validates `:supervisor`, `:strategy`, and expected child modules.
 - `run_chaos_suite/3` enforces a suite-wide timeout (`:timeout` / `:suite_timeout` failure reasons).
 
 ## Reliability and Safety Improvements
@@ -109,8 +109,9 @@ end
 Recent hardening changes include:
 
 - Atom-safe isolation and helper naming (no unbounded dynamic atom creation for test identifiers/process naming paths).
+- ETS table injection fallback no longer creates dynamic atoms at runtime.
 - More accurate chaos restart accounting (`restarted` is observed, not assumed).
-- Stronger leak detection for persistent leaked OTP processes.
+- Stronger leak detection focused on processes spawned or linked by the operation under test.
 
 ## Documentation
 

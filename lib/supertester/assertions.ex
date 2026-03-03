@@ -325,9 +325,8 @@ defmodule Supertester.Assertions do
   """
   @spec assert_no_process_leaks((-> any())) :: :ok
   def assert_no_process_leaks(operation_fun) when is_function(operation_fun, 0) do
-    initial_processes = Process.list()
-
-    operation_fun.()
+    initial_links = linked_processes(self())
+    spawned_processes = capture_spawned_processes(operation_fun)
 
     # Allow some time for cleanup using receive timeout instead of Process.sleep
     receive do
@@ -335,12 +334,14 @@ defmodule Supertester.Assertions do
       10 -> :ok
     end
 
-    final_processes = Process.list()
-    leaked_processes = final_processes -- initial_processes
+    final_links = linked_processes(self())
+    linked_candidates = final_links -- initial_links
+    leak_candidates = Enum.uniq(spawned_processes ++ linked_candidates)
 
     # Ignore transient processes that disappear quickly, but keep persistent leaks.
+    # Candidate leaks are limited to processes spawned by or linked to the operation caller.
     actual_leaks =
-      Enum.filter(leaked_processes, fn pid ->
+      Enum.filter(leak_candidates, fn pid ->
         Process.alive?(pid) and persistent_process?(pid, 20) and reportable_process?(pid)
       end)
 
@@ -398,6 +399,52 @@ defmodule Supertester.Assertions do
 
       _ ->
         nil
+    end
+  end
+
+  defp linked_processes(pid) when is_pid(pid) do
+    case Process.info(pid, :links) do
+      {:links, links} ->
+        Enum.filter(links, &is_pid/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp capture_spawned_processes(operation_fun) do
+    caller = self()
+    :erlang.trace(caller, true, [:procs])
+
+    try do
+      operation_fun.()
+    after
+      :erlang.trace(caller, false, [:procs])
+    end
+
+    drain_spawn_trace_messages(caller, [])
+    |> Enum.uniq()
+  end
+
+  defp drain_spawn_trace_messages(caller, acc) do
+    receive do
+      {:trace, ^caller, :spawn, spawned_pid, _mfa} when is_pid(spawned_pid) ->
+        drain_spawn_trace_messages(caller, [spawned_pid | acc])
+
+      {:trace, ^caller, :spawned, spawned_pid, _mfa} when is_pid(spawned_pid) ->
+        drain_spawn_trace_messages(caller, [spawned_pid | acc])
+
+      {:trace, ^caller, _event, _arg} ->
+        drain_spawn_trace_messages(caller, acc)
+
+      {:trace, ^caller, _event, _arg1, _arg2} ->
+        drain_spawn_trace_messages(caller, acc)
+
+      {:trace, ^caller, _event, _arg1, _arg2, _arg3} ->
+        drain_spawn_trace_messages(caller, acc)
+    after
+      0 ->
+        acc
     end
   end
 

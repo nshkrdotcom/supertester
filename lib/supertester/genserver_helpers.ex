@@ -173,12 +173,7 @@ defmodule Supertester.GenServerHelpers do
     tasks =
       for call <- calls,
           _ <- 1..count do
-        Task.async(fn ->
-          case call_with_timeout(server, call, timeout) do
-            {:ok, response} -> {:ok, call, response}
-            {:error, reason} -> {:error, call, reason}
-          end
-        end)
+        Task.async(fn -> execute_concurrent_call(server, call, timeout) end)
       end
 
     aggregated =
@@ -456,15 +451,18 @@ defmodule Supertester.GenServerHelpers do
   end
 
   defp handle_missing_sync(false, server, sync_message) do
-    if server_alive?(server) do
-      Logger.debug(fn ->
-        "GenServer #{inspect(server)} ignored sync message #{inspect(sync_message)}; assuming cast completed"
-      end)
+    log_missing_sync(server, sync_message)
+    {:error, :missing_sync_handler}
+  end
 
-      :ok
-    else
-      {:error, :missing_sync_handler}
-    end
+  defp log_missing_sync(server, sync_message) do
+    Logger.debug(fn ->
+      if server_alive?(server) do
+        "GenServer #{inspect(server)} ignored sync message #{inspect(sync_message)}; sync handler is required for deterministic cast assertions"
+      else
+        "GenServer #{inspect(server)} exited while probing sync message #{inspect(sync_message)}; sync handler is required for deterministic cast assertions"
+      end
+    end)
   end
 
   defp missing_sync_exit?(%RuntimeError{message: message}, sync_message) do
@@ -479,6 +477,13 @@ defmodule Supertester.GenServerHelpers do
 
   defp contains_sync_message?(message, _sync_message) do
     String.contains?(message, "no handle_call/3 clause was provided")
+  end
+
+  defp execute_concurrent_call(server, call, timeout) do
+    case call_with_timeout(server, call, timeout) do
+      {:ok, response} -> {:ok, call, response}
+      {:error, reason} -> {:error, call, reason}
+    end
   end
 
   defp server_alive?(pid) when is_pid(pid), do: Process.alive?(pid)

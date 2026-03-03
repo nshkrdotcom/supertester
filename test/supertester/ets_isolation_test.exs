@@ -21,6 +21,10 @@ defmodule Supertester.ETSIsolationTest do
     end
   end
 
+  defmodule UnsafeFallbackTableModule do
+    def table_name, do: :supertester_default_table
+  end
+
   defp unique_table_name(prefix) do
     :"#{prefix}_#{System.unique_integer([:positive])}"
   end
@@ -186,6 +190,14 @@ defmodule Supertester.ETSIsolationTest do
       assert InjectedTableModule.table_name() == :supertester_default_table
       assert :ets.info(table) != :undefined
       :ets.delete(table)
+    end
+
+    test "inject_table/4 rejects unsafe fallback when module cannot update table references safely" do
+      replacement = unique_table_name("unsafe_fallback")
+
+      assert_raise ArgumentError, ~r/__supertester_set_table__/, fn ->
+        ETSIsolation.inject_table(UnsafeFallbackTableModule, :table_name, replacement)
+      end
     end
   end
 

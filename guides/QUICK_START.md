@@ -1,6 +1,6 @@
 # Supertester Quick Start Guide
 **Version**: 0.6.0
-**Last Updated**: March 2, 2026
+**Last Updated**: March 3, 2026
 
 Get up and running with Supertester in 5 minutes!
 
@@ -369,7 +369,8 @@ Module implementations are well-documented - great learning resource!
 → Make sure you're using `cast_and_sync` instead of `cast` + sleep
 
 ### `{:error, :missing_sync_handler}` from `cast_and_sync/4`?
-→ Add `use Supertester.TestableGenServer` to the target server (or run with `strict?: true` to raise immediately).
+→ This means the target server does not implement the sync handler.
+Add `use Supertester.TestableGenServer` (or use `strict?: true` to raise immediately).
 
 ### Name conflicts?
 → Use `setup_isolated_genserver` which generates unique isolated names.
@@ -378,7 +379,7 @@ Module implementations are well-documented - great learning resource!
 → Use `wait_for_supervisor_stabilization` after causing failures
 
 ### Chaos tests too aggressive?
-→ Reduce `kill_rate` or `duration_ms` parameters
+→ Reduce `kill_rate`/`duration_ms`, or set `kill_rate: 0.0` for a no-kill baseline.
 
 ---
 

@@ -191,6 +191,33 @@ defmodule Supertester.ChaosHelpersTest do
       assert length(new_children) == 5
     end
 
+    test "kill_rate 0.0 does not kill or restart any children" do
+      {:ok, supervisor} =
+        ResilientSupervisor.start_link(
+          workers: 3,
+          name: :"test_sup_#{:erlang.unique_integer([:positive])}"
+        )
+
+      initial_children =
+        Supervisor.which_children(supervisor)
+        |> Enum.map(fn {id, pid, _type, _mods} -> {id, pid} end)
+        |> Enum.sort()
+
+      report =
+        chaos_kill_children(supervisor, kill_rate: 0.0, duration_ms: 80, kill_interval_ms: 20)
+
+      :ok = wait_for_supervisor_stabilization(supervisor)
+
+      final_children =
+        Supervisor.which_children(supervisor)
+        |> Enum.map(fn {id, pid, _type, _mods} -> {id, pid} end)
+        |> Enum.sort()
+
+      assert report.killed == 0
+      assert report.restarted == 0
+      assert initial_children == final_children
+    end
+
     test "supervisor survives chaos" do
       {:ok, supervisor} =
         ResilientSupervisor.start_link(

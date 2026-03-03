@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - README and guides refreshed for current 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, and expanded helper coverage).
+- `GenServerHelpers.cast_and_sync/4` now consistently returns `{:error, :missing_sync_handler}` in non-strict mode whenever sync handling is missing (instead of returning `:ok` on alive targets).
+- `SupervisorHelpers.assert_supervision_tree_structure/2` now validates expected child modules for leaf children, not only child IDs.
+- `Assertions.assert_no_process_leaks/1` now scopes leak detection to processes spawned or linked by the operation caller, reducing async false positives.
+- `ChaosHelpers.chaos_kill_children/2` now treats `kill_rate <= 0` as a no-kill run (`killed == 0`).
+- `ETSIsolation.inject_table/3-4` fallback path now rejects dynamic atom creation and requires a safe/pre-existing env key or `__supertester_set_table__/2`.
 
 ### Fixed
 - Isolation and helper naming paths no longer rely on unbounded dynamic atom creation (`test_id` is string-based; shared registry/process naming are atom-safe).
@@ -19,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Assertions.assert_supervisor_strategy/2` now validates runtime supervisor strategy instead of only process accessibility.
 - `ChaosHelpers.chaos_kill_children/2` now reports observed child replacements for `restarted`, and `run_chaos_suite/3` now enforces suite-wide timeout semantics.
 - `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately and reports persistent leaks with lower false-positive noise.
+- Updated version assertion test to `0.6.0`.
+- Refactored `GenServerHelpers.concurrent_calls/4` internals to satisfy strict Credo nesting limits without behavior changes.
 
 ## [0.5.1] - 2026-01-09
 
