@@ -1,6 +1,6 @@
 # Supertester API Guide
 
-Version: 0.6.0  
+Version: 0.6.0
 Last Updated: March 3, 2026
 
 This guide documents the main public APIs and behavior-sensitive edge cases.
@@ -26,6 +26,36 @@ Options:
 - `:logger_isolation`
 - `:ets_isolation`
 
+### `Supertester.Env`
+
+Environment abstraction for test runner integration. By default delegates to `ExUnit.Callbacks.on_exit/1`.
+
+```elixir
+@callback on_exit((-> any())) :: :ok
+@spec on_exit((-> any())) :: :ok
+```
+
+Override via application config:
+
+```elixir
+config :supertester, env_module: MyApp.CustomTestEnv
+```
+
+Custom implementation example:
+
+```elixir
+defmodule MyApp.CustomTestEnv do
+  @behaviour Supertester.Env
+
+  @impl true
+  def on_exit(callback) when is_function(callback, 0) do
+    MyHarness.register_cleanup(callback)
+  end
+end
+```
+
+The default implementation (`Supertester.Env.ExUnit`) calls `ExUnit.Callbacks.on_exit/1`.
+
 ## OTP Helpers
 
 ### `Supertester.OTPHelpers`
@@ -42,6 +72,8 @@ Options:
 @spec cleanup_on_exit((-> any())) :: :ok
 ```
 
+Process names are generated as `{:via, Registry, {:supertester_shared_registry, ...}}` tuples to avoid dynamic atom creation while ensuring async-safe uniqueness.
+
 ### `Supertester.GenServerHelpers`
 
 ```elixir
@@ -56,18 +88,20 @@ Options:
 
 `cast_and_sync/4` semantics:
 
+- When the sync handler replies `:ok` (the default `TestableGenServer` behavior), returns bare `:ok`. When it replies with any other value, returns `{:ok, reply}`.
 - missing sync support:
   - `strict?: true` raises `ArgumentError`.
   - `strict?: false` returns `{:error, :missing_sync_handler}`.
-- handled sync replies return `{:ok, reply}`.
 - covers missing-handler crashes raised as both runtime and function-clause exit shapes.
 
 ### `Supertester.TestableGenServer`
 
-Injects:
+Injects sync handlers via `@before_compile` macro:
 
-- `handle_call(:__supertester_sync__, ...)`
-- `handle_call({:__supertester_sync__, opts}, ...)`
+- `handle_call(:__supertester_sync__, ...)` — replies `:ok`
+- `handle_call({:__supertester_sync__, opts}, ...)` — replies `:ok` or `{:ok, state}` when `return_state: true`
+
+Usage: add `use Supertester.TestableGenServer` after `use GenServer` in your module.
 
 ## Supervisor Helpers
 
@@ -83,8 +117,9 @@ Injects:
 
 Behavior notes:
 
-- `test_restart_strategy/3` raises on strategy mismatch and unknown scenario child IDs.
+- `test_restart_strategy/3` validates strategy at runtime and raises on mismatch or unknown scenario child IDs.
 - removed temporary children are not classified as restarted.
+- `assert_supervision_tree_structure/2` validates supervisor module, strategy, and child modules when specified.
 
 ## Chaos
 
@@ -100,7 +135,7 @@ Behavior notes:
 
 Behavior notes:
 
-- `chaos_kill_children/2` accepts pid and registered supervisor names for supervisor-based scenarios.
+- `chaos_kill_children/2` accepts pid and registered supervisor names (atom, `{:global, _}`, `{:via, _, _}`).
 - `restarted` counts observed child replacements, including cascade replacements.
 - `run_chaos_suite/3`:
   - applies suite deadline with `:timeout` and `:suite_timeout` when execution overruns.
@@ -125,11 +160,14 @@ Behavior notes:
 @spec assert_performance_within_bounds(map(), map()) :: :ok
 ```
 
+`assert_supervisor_strategy/2` validates the runtime supervisor strategy by introspecting internal state. Works with both standard Supervisors (tuple-based state) and DynamicSupervisors (map-based state).
+
 `assert_no_process_leaks/1`:
 
 - traces spawned/linked descendants attributable to the operation.
 - catches delayed descendant leaks.
 - ignores short-lived transient processes.
+- propagates exceptions from the operation.
 
 ## Performance
 

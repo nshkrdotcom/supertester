@@ -98,7 +98,10 @@ defmodule Supertester.GenServerHelpers do
 
   ## Returns
 
-  `:ok` if successful, `{:error, reason}` otherwise
+  - `:ok` when the sync handler replies `:ok` (the default `TestableGenServer` behavior).
+  - `{:ok, reply}` when the sync handler replies with any other value.
+  - `{:error, :missing_sync_handler}` in non-strict mode when the sync handler is missing.
+  - Raises `ArgumentError` in strict mode when the sync handler is missing.
 
   ## Example
 

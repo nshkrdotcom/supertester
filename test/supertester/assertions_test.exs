@@ -189,6 +189,24 @@ defmodule Supertester.AssertionsTest do
     end
   end
 
+  test "assert_supervisor_strategy succeeds when strategy matches" do
+    {:ok, supervisor} = OneForOneSupervisor.start_link()
+    assert :ok = assert_supervisor_strategy(supervisor, :one_for_one)
+  end
+
+  test "assert_supervisor_strategy works with DynamicSupervisor (map-based state)" do
+    {:ok, supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
+    assert :ok = assert_supervisor_strategy(supervisor, :one_for_one)
+  end
+
+  test "assert_no_process_leaks propagates exceptions from the operation" do
+    assert_raise RuntimeError, "boom", fn ->
+      assert_no_process_leaks(fn ->
+        raise "boom"
+      end)
+    end
+  end
+
   test "assert_no_process_leaks ignores short-lived transient spawned processes" do
     assert :ok =
              assert_no_process_leaks(fn ->

@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GenServerHelpers.cast_and_sync/4` now returns `{:error, :missing_sync_handler}` in non-strict mode when sync probing reveals a missing handler via process exit.
 - `SupervisorHelpers.test_restart_strategy/3` and `assert_supervision_tree_structure/2` now enforce expected strategy/module checks more strictly, including map-based supervisor internals (`DynamicSupervisor`).
 - `Assertions.assert_supervisor_strategy/2` now validates runtime supervisor strategy instead of only process accessibility.
-- `ChaosHelpers.chaos_kill_children/2` now accepts registered supervisor names (`:local`, `{:global, _}`, `{:via, _, _}`) in addition to pid inputs.
+- `ChaosHelpers.chaos_kill_children/2` now accepts registered supervisor names (atom, `{:global, _}`, `{:via, _, _}`) in addition to pid inputs.
 - `ChaosHelpers.chaos_kill_children/2` now reports observed child replacements for `restarted`, handles duplicate child IDs correctly (for example, dynamic children with `:undefined` IDs), and `run_chaos_suite/3` enforces suite-wide timeout semantics.
 - `ChaosHelpers.simulate_resource_exhaustion/2` now treats non-positive `spawn_count` / `count` values as no-op requests instead of allocating resources via descending ranges.
 - `Assertions.assert_no_process_leaks/1` now filters transient processes more accurately, traces spawned descendant trees, and reports persistent leaks with lower false-positive noise.
@@ -42,9 +42,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ChaosHelpers.run_chaos_suite/3` now distinguishes true per-scenario deadline overruns from ordinary scenario failures with reason `:timeout`; only actual deadline overruns trigger suite cutoff semantics.
 - `Assertions.assert_no_process_leaks/1` corrected `:spawned` trace handling and improved persistence checks to reduce false positives from unrelated/self trace events while preserving delayed-descendant leak detection.
 
+- Extracted shared supervisor introspection utilities (`extract_supervisor_strategy`, `resolve_supervisor_pid`, `group_child_pids_by_id`) into `Supertester.Internal.SupervisorIntrospection`, eliminating code duplication across `Assertions`, `SupervisorHelpers`, and `ChaosHelpers`.
+- Process naming in `OTPHelpers` and `TelemetryHelpers` switched from `{:global, ...}` to `{:via, Registry, {:supertester_shared_registry, ...}}` for lighter-weight single-node operation.
+- `TelemetryHelpers` buffer Agent now uses `Agent.start_link` (linked) and Registry-based naming instead of `Agent.start` (unlinked) with `:global` naming, preventing resource leaks on test crashes.
+- `Assertions.extract_supervisor_strategy/1` now handles both tuple-based (standard Supervisor) and map-based (DynamicSupervisor) internal state formats.
+
+### Fixed
+- `cast_and_sync/4` documentation behavioral notes now correctly distinguish bare `:ok` return (when sync handler replies `:ok`) from `{:ok, reply}` return (when sync handler replies with other values).
+- Telemetry buffer Agent no longer leaks when test process crashes (now linked to caller).
+- Shared registry is unlinked from creator to survive when spawned from short-lived Task processes.
+
 ### Documentation
-- Updated `README.md`, `guides/QUICK_START.md`, `guides/MANUAL.md`, `guides/API_GUIDE.md`, and `guides/DOCS_INDEX.md` for current cast/sync semantics, stricter supervisor scenario validation, chaos crash handling, leak-detection behavior, atom-safety notes, and corrected arity headings.
-- Rewrote `README.md`, `guides/QUICK_START.md`, `guides/MANUAL.md`, `guides/API_GUIDE.md`, and `guides/DOCS_INDEX.md` to align examples and behavior notes with actual signatures and runtime semantics.
+- Documentation refreshed with corrected `cast_and_sync/4` return value semantics across README, QUICK_START, MANUAL, and API_GUIDE.
+- Restored onboarding content: prerequisites (TestableGenServer), common patterns, and troubleshooting sections added to QUICK_START and MANUAL.
+- `Supertester.Env` documented in API_GUIDE and MANUAL with behaviour spec and custom implementation example.
+- Added migration guide for upgrading from 0.5.1 to 0.6.0.
+
+### Migration from 0.5.1
+
+If upgrading from 0.5.x to 0.6.0, note the following breaking changes:
+
+1. **`cast_and_sync/4` missing-sync behavior**: Non-strict mode now consistently returns `{:error, :missing_sync_handler}` instead of `:ok` for servers without sync handlers. Update assertions that matched bare `:ok` for servers without sync support.
+
+2. **`test_restart_strategy/3` raises on missing children**: Scenario child IDs that do not exist in the supervisor now raise `ArgumentError`. Ensure all scenario child IDs match actual supervisor children.
+
+3. **`assert_supervision_tree_structure/2` validates child modules**: Leaf children now have their modules checked. Tests that only validated child IDs may need updating.
+
+4. **`ETSIsolation.inject_table/3-4` atom safety**: Fallback path no longer creates dynamic atoms. Use `__supertester_set_table__/2` callback or pre-existing env keys.
+
+5. **Process naming format**: Process names generated by `setup_isolated_genserver/3` and `setup_isolated_supervisor/3` use `{:via, Registry, {:supertester_shared_registry, ...}}` instead of `{:global, ...}` tuples. Code that pattern-matches on the exact name structure must be updated.
 
 ## [0.5.1] - 2026-01-09
 

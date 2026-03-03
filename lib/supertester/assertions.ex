@@ -1,4 +1,6 @@
 defmodule Supertester.Assertions do
+  alias Supertester.Internal.SupervisorIntrospection
+
   @persistent_leak_wait_ms 75
 
   @moduledoc """
@@ -389,22 +391,11 @@ defmodule Supertester.Assertions do
 
   # Private functions
 
-  @strategies [:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one]
   @type pid_set :: %{optional(pid()) => true}
   @spawn_trace_grace_ms 50
 
   defp extract_supervisor_strategy(supervisor) do
-    state = :sys.get_state(supervisor)
-
-    case state do
-      tuple when is_tuple(tuple) ->
-        tuple
-        |> Tuple.to_list()
-        |> Enum.find(fn value -> value in @strategies end)
-
-      _ ->
-        nil
-    end
+    SupervisorIntrospection.extract_supervisor_strategy(supervisor)
   end
 
   defp linked_processes(pid) when is_pid(pid) do

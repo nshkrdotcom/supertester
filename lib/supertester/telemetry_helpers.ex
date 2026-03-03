@@ -284,7 +284,8 @@ defmodule Supertester.TelemetryHelpers do
           {result, [telemetry_message()]}
         when result: term()
   def with_telemetry(events, fun, opts \\ []) when is_function(fun, 0) do
-    {:ok, _handler_id} = attach_isolated(events, Keyword.put(opts, :buffer, true))
+    normalized_events = normalize_events(events)
+    {:ok, _handler_id} = attach_isolated(normalized_events, Keyword.put(opts, :buffer, true))
 
     result = fun.()
 
@@ -293,7 +294,16 @@ defmodule Supertester.TelemetryHelpers do
       10 -> :ok
     end
 
-    {result, flush_buffer()}
+    buffered_events = flush_buffer()
+
+    events =
+      if buffered_events == [] do
+        flush_buffer_fallback(normalized_events, get_test_id())
+      else
+        buffered_events
+      end
+
+    {result, events}
   end
 
   @doc """
@@ -336,37 +346,61 @@ defmodule Supertester.TelemetryHelpers do
     end
   end
 
+  @shared_registry_name :supertester_shared_registry
+
   defp buffer_event(parent, message) do
     buffer_name = telemetry_buffer_name(parent)
 
-    case Agent.start(fn -> [] end, name: buffer_name) do
+    case Agent.start_link(fn -> [] end, name: buffer_name) do
       {:ok, _pid} ->
+        Agent.update(buffer_name, &[message | &1])
         :ok
 
       {:error, {:already_started, _pid}} ->
+        Agent.update(buffer_name, &[message | &1])
         :ok
-    end
 
-    Agent.update(buffer_name, &[message | &1])
+      {:error, _reason} ->
+        {:error, :buffer_unavailable}
+    end
+  rescue
+    _ ->
+      {:error, :buffer_unavailable}
+  catch
+    :exit, _ ->
+      {:error, :buffer_unavailable}
   end
 
   defp flush_buffer do
-    buffer_id = {:supertester_telemetry_buffer, self()}
+    buffer_key = {:supertester_telemetry_buffer, self()}
     buffer_name = telemetry_buffer_name(self())
 
-    case :global.whereis_name(buffer_id) do
-      :undefined ->
+    case Registry.lookup(@shared_registry_name, buffer_key) do
+      [] ->
         []
 
-      pid ->
+      [{pid, _value}] ->
         events = Agent.get(pid, &Enum.reverse/1)
         Agent.stop(buffer_name)
         events
     end
   end
 
+  defp flush_buffer_fallback(event_patterns, test_id) do
+    telemetry_messages = flush_telemetry(:all)
+
+    {matching, unmatched} =
+      Enum.split_with(telemetry_messages, fn {:telemetry, event, _measurements, metadata} ->
+        event in event_patterns and matches_test_id?(metadata, test_id)
+      end)
+
+    Enum.each(unmatched, &send(self(), &1))
+    matching
+  end
+
   defp telemetry_buffer_name(parent_pid) when is_pid(parent_pid) do
-    {:global, {:supertester_telemetry_buffer, parent_pid}}
+    Supertester.UnifiedTestFoundation.ensure_shared_registry_started()
+    {:via, Registry, {@shared_registry_name, {:supertester_telemetry_buffer, parent_pid}}}
   end
 
   defp receive_matching_telemetry(event_pattern, metadata_pattern, test_id, timeout) do
@@ -501,6 +535,12 @@ defmodule Supertester.TelemetryHelpers do
     })
   end
 
-  defp deliver_event(parent, message, true), do: buffer_event(parent, message)
+  defp deliver_event(parent, message, true) do
+    case buffer_event(parent, message) do
+      :ok -> :ok
+      {:error, :buffer_unavailable} -> send(parent, message)
+    end
+  end
+
   defp deliver_event(parent, message, false), do: send(parent, message)
 end

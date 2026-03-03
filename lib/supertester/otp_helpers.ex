@@ -330,7 +330,11 @@ defmodule Supertester.OTPHelpers do
     end
   end
 
+  @shared_registry_name :supertester_shared_registry
+
   defp generate_unique_process_name(module, test_name) do
+    Supertester.UnifiedTestFoundation.ensure_shared_registry_started()
+
     module_segment =
       module
       |> Module.split()
@@ -351,7 +355,7 @@ defmodule Supertester.OTPHelpers do
             value -> value
           end
 
-        {:global, {:supertester, module, key, serial}}
+        {:via, Registry, {@shared_registry_name, {:supertester, module, key, serial}}}
 
       _ ->
         key =
@@ -363,7 +367,7 @@ defmodule Supertester.OTPHelpers do
             value -> value
           end
 
-        {:global, {:supertester, module, key, serial}}
+        {:via, Registry, {@shared_registry_name, {:supertester, module, key, serial}}}
     end
   end
 

@@ -1,4 +1,6 @@
 defmodule Supertester.SupervisorHelpers do
+  alias Supertester.Internal.SupervisorIntrospection
+
   @moduledoc """
   Specialized testing utilities for supervision trees.
 
@@ -373,13 +375,7 @@ defmodule Supertester.SupervisorHelpers do
   end
 
   defp group_child_pids_by_id(children) do
-    Enum.reduce(children, %{}, fn
-      {id, pid, _type, _mods}, acc when is_pid(pid) ->
-        Map.update(acc, id, [pid], &[pid | &1])
-
-      _child, acc ->
-        acc
-    end)
+    SupervisorIntrospection.group_child_pids_by_id(children)
   end
 
   defp child_restarted?(_initial_pids, []), do: false
@@ -399,26 +395,9 @@ defmodule Supertester.SupervisorHelpers do
     raise ArgumentError, "Supervisor child #{inspect(child_id)} not found"
   end
 
-  defp resolve_supervisor_pid(pid) when is_pid(pid), do: pid
-  defp resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
-
-  defp resolve_supervisor_pid({:global, name}) do
-    case :global.whereis_name(name) do
-      :undefined -> nil
-      pid -> pid
-    end
+  defp resolve_supervisor_pid(supervisor) do
+    SupervisorIntrospection.resolve_supervisor_pid(supervisor)
   end
-
-  defp resolve_supervisor_pid({:via, module, name}) do
-    case module.whereis_name(name) do
-      :undefined -> nil
-      pid -> pid
-    end
-  end
-
-  defp resolve_supervisor_pid(_), do: nil
-
-  @strategies [:one_for_one, :one_for_all, :rest_for_one, :simple_one_for_one]
 
   defp validate_supervisor_strategy!(supervisor, expected_strategy) do
     actual_strategy = extract_supervisor_strategy(supervisor)
@@ -474,25 +453,8 @@ defmodule Supertester.SupervisorHelpers do
   end
 
   defp extract_supervisor_strategy(supervisor) do
-    supervisor
-    |> fetch_supervisor_state()
-    |> do_extract_supervisor_strategy()
+    SupervisorIntrospection.extract_supervisor_strategy(supervisor)
   end
-
-  defp do_extract_supervisor_strategy(%{strategy: strategy}) when strategy in @strategies,
-    do: strategy
-
-  defp do_extract_supervisor_strategy({:state, _name, strategy, _rest})
-       when strategy in @strategies,
-       do: strategy
-
-  defp do_extract_supervisor_strategy(tuple) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.find(fn value -> value in @strategies end)
-  end
-
-  defp do_extract_supervisor_strategy(_), do: nil
 
   defp extract_supervisor_module(supervisor) do
     supervisor

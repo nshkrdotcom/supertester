@@ -1,4 +1,6 @@
 defmodule Supertester.ChaosHelpers do
+  alias Supertester.Internal.SupervisorIntrospection
+
   @moduledoc """
   Chaos engineering toolkit for OTP resilience testing.
 
@@ -504,13 +506,7 @@ defmodule Supertester.ChaosHelpers do
   end
 
   defp group_child_pids_by_id(children) do
-    Enum.reduce(children, %{}, fn
-      {id, pid, _type, _mods}, acc when is_pid(pid) ->
-        Map.update(acc, id, [pid], &[pid | &1])
-
-      _child, acc ->
-        acc
-    end)
+    SupervisorIntrospection.group_child_pids_by_id(children)
   end
 
   defp replacement_count(_initial_pids, []), do: 0
@@ -644,22 +640,7 @@ defmodule Supertester.ChaosHelpers do
     :exit, _ -> []
   end
 
-  defp resolve_supervisor_pid(pid) when is_pid(pid), do: pid
-  defp resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
-
-  defp resolve_supervisor_pid({:global, name}) do
-    case :global.whereis_name(name) do
-      :undefined -> nil
-      pid -> pid
-    end
+  defp resolve_supervisor_pid(supervisor) do
+    SupervisorIntrospection.resolve_supervisor_pid(supervisor)
   end
-
-  defp resolve_supervisor_pid({:via, module, name}) do
-    case module.whereis_name(name) do
-      :undefined -> nil
-      pid -> pid
-    end
-  end
-
-  defp resolve_supervisor_pid(_), do: nil
 end

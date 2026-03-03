@@ -275,15 +275,23 @@ defmodule Supertester.UnifiedTestFoundation do
     ArgumentError -> :ok
   end
 
-  defp ensure_shared_registry_started do
+  @doc false
+  def ensure_shared_registry_started do
     case Process.whereis(@shared_registry_name) do
       pid when is_pid(pid) ->
         {:ok, pid}
 
       nil ->
         case Registry.start_link(keys: :unique, name: @shared_registry_name) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
+          {:ok, pid} ->
+            # Unlink so the Registry survives when short-lived callers
+            # (e.g. Task processes) exit. The Registry is a shared singleton
+            # that should live for the entire BEAM lifetime.
+            Process.unlink(pid)
+            {:ok, pid}
+
+          {:error, {:already_started, pid}} ->
+            {:ok, pid}
         end
     end
   end

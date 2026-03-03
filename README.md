@@ -61,20 +61,22 @@ end
 - `Supertester.ConcurrentHarness` - declarative multi-thread scenario runner.
 - `Supertester.PropertyHelpers` - StreamData generators for scenarios.
 - `Supertester.MessageHarness` - mailbox tracing for diagnostics.
+- `Supertester.Env` - environment abstraction for custom test runner integration.
 - `Supertester.Telemetry`, `TelemetryHelpers`, `LoggerIsolation`, `ETSIsolation`.
 
 ## Behavioral Notes
 
 - `cast_and_sync/4`
+  - When the sync handler replies `:ok` (the default `TestableGenServer` behavior), returns bare `:ok`.
+  - When the sync handler replies with any other value (including error tuples), returns `{:ok, reply}`.
   - `strict?: true` raises `ArgumentError` when synchronization support is missing.
   - Non-strict mode returns `{:error, :missing_sync_handler}` when missing.
-  - Explicit sync replies (including error tuples) return `{:ok, reply}`.
 - `test_restart_strategy/3`
   - validates expected supervisor strategy and raises on mismatch.
   - raises `ArgumentError` when scenario child IDs are unknown.
   - temporary removed children are not reported as restarted.
 - `chaos_kill_children/2`
-  - accepts pid or registered supervisor name (`:local`, `{:global, _}`, `{:via, _, _}`).
+  - accepts pid or registered supervisor name (atom, `{:global, _}`, `{:via, _, _}`).
   - `restarted` counts observed child replacements, including cascade replacements.
 - `run_chaos_suite/3`
   - applies a suite-level timeout.

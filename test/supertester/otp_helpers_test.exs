@@ -53,7 +53,11 @@ defmodule Supertester.OTPHelpersTest do
       Enum.find(isolation_context.processes, fn %{pid: tracked_pid} -> tracked_pid == pid end)
 
     assert tracked
-    assert {:global, {:supertester, NamedServer, name_string, _serial}} = tracked.name
+
+    assert {:via, Registry,
+            {:supertester_shared_registry, {:supertester, NamedServer, name_string, _serial}}} =
+             tracked.name
+
     assert GenServer.whereis(tracked.name) == pid
 
     assert String.contains?(name_string, "NamedServer")

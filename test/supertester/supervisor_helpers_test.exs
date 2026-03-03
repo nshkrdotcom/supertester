@@ -181,6 +181,16 @@ defmodule Supertester.SupervisorHelpersTest do
       assert result.supervisor_alive
     end
 
+    test "happy path: kills child and reports restart via function call" do
+      {:ok, supervisor} = TestSupervisor.start_link(strategy: :one_for_one, children: 2)
+
+      result = test_restart_strategy(supervisor, :one_for_one, {:kill_child, :worker_1})
+
+      assert :worker_1 in result.restarted
+      assert :worker_2 in result.not_restarted
+      assert result.supervisor_alive == true
+    end
+
     test "does not report removed temporary children as restarted" do
       {:ok, supervisor} = TemporarySupervisor.start_link()
 

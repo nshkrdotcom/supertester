@@ -118,6 +118,10 @@ defmodule Supertester.MixProject do
         ],
         "Release Notes": ["CHANGELOG.md"]
       ],
+      skip_code_autolink_to: [
+        "Supertester.Env.ExUnit",
+        "Supertester.Internal.SupervisorIntrospection"
+      ],
       groups_for_modules: [
         "Core API": [
           Supertester,
