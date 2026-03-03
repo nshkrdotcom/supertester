@@ -290,8 +290,20 @@ defmodule Supertester.GenServerHelpers do
 
   defp resolve_server_pid(pid) when is_pid(pid), do: pid
   defp resolve_server_pid(name) when is_atom(name), do: Process.whereis(name)
-  defp resolve_server_pid({:global, name}), do: :global.whereis_name(name)
-  defp resolve_server_pid({:via, module, name}), do: module.whereis_name(name)
+
+  defp resolve_server_pid({:global, name}) do
+    case :global.whereis_name(name) do
+      pid when is_pid(pid) -> pid
+      _ -> nil
+    end
+  end
+
+  defp resolve_server_pid({:via, module, name}) do
+    case module.whereis_name(name) do
+      pid when is_pid(pid) -> pid
+      _ -> nil
+    end
+  end
 
   defp do_crash_recovery_test(server, original_pid, crash_reason) do
     ref = Process.monitor(original_pid)

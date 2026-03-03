@@ -179,5 +179,24 @@ defmodule Supertester.TelemetryHelpersTest do
       assert_receive {:telemetry, [:test, :context], %{},
                       %{supertester_test_id: ^test_id, tag: "ok"}}
     end
+
+    test "with_telemetry/3 does not accumulate handlers across repeated calls" do
+      {first_result, first_events} =
+        TelemetryHelpers.with_telemetry([[:test, :repeat]], fn ->
+          TelemetryHelpers.emit_with_context([:test, :repeat], %{value: 1}, %{})
+          :first
+        end)
+
+      {second_result, second_events} =
+        TelemetryHelpers.with_telemetry([[:test, :repeat]], fn ->
+          TelemetryHelpers.emit_with_context([:test, :repeat], %{value: 2}, %{})
+          :second
+        end)
+
+      assert first_result == :first
+      assert second_result == :second
+      assert length(first_events) == 1
+      assert length(second_events) == 1
+    end
   end
 end

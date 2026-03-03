@@ -6,6 +6,7 @@ defmodule Supertester.LoggerIsolation do
   require Logger
 
   alias Supertester.{Env, IsolationContext, Telemetry, UnifiedTestFoundation}
+  alias Supertester.Internal.IsolationContextStore
 
   @type level ::
           :emergency | :alert | :critical | :error | :warning | :notice | :info | :debug
@@ -35,7 +36,7 @@ defmodule Supertester.LoggerIsolation do
       restore_level()
     end)
 
-    maybe_update_context(fn ctx ->
+    IsolationContextStore.update(fn ctx ->
       %{ctx | logger_original_level: original_level, logger_isolated?: true}
     end)
 
@@ -91,7 +92,7 @@ defmodule Supertester.LoggerIsolation do
     Process.delete(:supertester_logger_original_level)
     Process.delete(:supertester_logger_cleanup_registered)
 
-    maybe_update_context(fn ctx ->
+    IsolationContextStore.update(fn ctx ->
       %{ctx | logger_original_level: nil, logger_isolated?: false}
     end)
 
@@ -184,18 +185,6 @@ defmodule Supertester.LoggerIsolation do
 
   defp restore_previous_level(nil), do: Logger.delete_process_level(self())
   defp restore_previous_level(level), do: Logger.put_process_level(self(), level)
-
-  defp maybe_update_context(fun) do
-    case UnifiedTestFoundation.fetch_isolation_context() do
-      %IsolationContext{} = ctx ->
-        updated_ctx = fun.(ctx)
-        UnifiedTestFoundation.put_isolation_context(updated_ctx)
-        updated_ctx
-
-      _ ->
-        nil
-    end
-  end
 
   defp emit_setup do
     Telemetry.emit([:logger, :isolation, :setup], %{}, %{pid: self()})

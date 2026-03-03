@@ -79,12 +79,12 @@ defmodule Supertester.SupervisorHelpers do
   def test_restart_strategy(supervisor, expected_strategy, scenario) do
     validate_supervisor_strategy!(supervisor, expected_strategy)
 
-    supervisor_pid = resolve_supervisor_pid(supervisor)
+    supervisor_pid = SupervisorIntrospection.resolve_supervisor_pid(supervisor)
 
     # Get initial state
     initial_children = Supervisor.which_children(supervisor)
 
-    initial_state = group_child_pids_by_id(initial_children)
+    initial_state = SupervisorIntrospection.group_child_pids_by_id(initial_children)
 
     # Execute scenario
     case scenario do
@@ -111,7 +111,7 @@ defmodule Supertester.SupervisorHelpers do
     # Get new state
     new_children = Supervisor.which_children(supervisor)
 
-    new_state = group_child_pids_by_id(new_children)
+    new_state = SupervisorIntrospection.group_child_pids_by_id(new_children)
 
     # Compare states
     restarted =
@@ -374,10 +374,6 @@ defmodule Supertester.SupervisorHelpers do
     end
   end
 
-  defp group_child_pids_by_id(children) do
-    SupervisorIntrospection.group_child_pids_by_id(children)
-  end
-
   defp child_restarted?(_initial_pids, []), do: false
 
   defp child_restarted?(initial_pids, current_pids) do
@@ -395,12 +391,8 @@ defmodule Supertester.SupervisorHelpers do
     raise ArgumentError, "Supervisor child #{inspect(child_id)} not found"
   end
 
-  defp resolve_supervisor_pid(supervisor) do
-    SupervisorIntrospection.resolve_supervisor_pid(supervisor)
-  end
-
   defp validate_supervisor_strategy!(supervisor, expected_strategy) do
-    actual_strategy = extract_supervisor_strategy(supervisor)
+    actual_strategy = SupervisorIntrospection.extract_supervisor_strategy(supervisor)
 
     cond do
       actual_strategy == nil ->
@@ -440,7 +432,7 @@ defmodule Supertester.SupervisorHelpers do
         :ok
 
       expected_strategy ->
-        actual_strategy = extract_supervisor_strategy(supervisor)
+        actual_strategy = SupervisorIntrospection.extract_supervisor_strategy(supervisor)
 
         if actual_strategy == nil do
           raise "Unable to determine supervisor strategy for #{inspect(supervisor)}"
@@ -450,10 +442,6 @@ defmodule Supertester.SupervisorHelpers do
           raise "Expected supervisor strategy #{inspect(expected_strategy)}, got #{inspect(actual_strategy)}"
         end
     end
-  end
-
-  defp extract_supervisor_strategy(supervisor) do
-    SupervisorIntrospection.extract_supervisor_strategy(supervisor)
   end
 
   defp extract_supervisor_module(supervisor) do

@@ -75,6 +75,10 @@ defmodule Supertester.GenServerHelpersTest do
     def handle_call(:known_call, _from, state), do: {:reply, :ok, state}
   end
 
+  defmodule MissingViaRegistry do
+    def whereis_name(_name), do: :undefined
+  end
+
   setup do
     {:ok, no_sync} = start_supervised(NoSyncServer)
     {:ok, unknown_call} = start_supervised(UnknownCallServer)
@@ -181,5 +185,18 @@ defmodule Supertester.GenServerHelpersTest do
     assert calls + casts >= 0
     assert errors >= 0
     assert duration >= 50
+  end
+
+  test "test_server_crash_recovery returns server_not_found for missing global names" do
+    assert {:error, :server_not_found} =
+             test_server_crash_recovery({:global, {:missing_server, make_ref()}}, :test_crash)
+  end
+
+  test "test_server_crash_recovery returns server_not_found for missing via names" do
+    assert {:error, :server_not_found} =
+             test_server_crash_recovery(
+               {:via, MissingViaRegistry, {:missing_server, make_ref()}},
+               :test_crash
+             )
   end
 end

@@ -1,4 +1,6 @@
 defmodule Supertester.OTPHelpers do
+  alias Supertester.Internal.ProcessLifecycle
+
   @moduledoc """
   OTP-compliant testing utilities for GenServer, Supervisor, and process management.
 
@@ -106,7 +108,7 @@ defmodule Supertester.OTPHelpers do
       {:error, reason} ->
         {:error,
          {:start_failed,
-          build_failure_metadata(:supervisor, module, supervisor_opts, opts, reason)}}
+          build_failure_metadata(:supervisor, module, supervisor_opts, init_args, reason)}}
     end
   end
 
@@ -253,7 +255,7 @@ defmodule Supertester.OTPHelpers do
   """
   @spec cleanup_processes([pid()]) :: :ok
   def cleanup_processes(pids) when is_list(pids) do
-    Enum.each(pids, &stop_process_safely/1)
+    Enum.each(pids, &ProcessLifecycle.stop_process_safely/1)
   end
 
   @doc """
@@ -401,7 +403,7 @@ defmodule Supertester.OTPHelpers do
     if Process.alive?(pid) do
       Enum.each(Supervisor.which_children(pid), fn
         {_id, child_pid, _type, _modules} when is_pid(child_pid) ->
-          stop_process_safely(%{pid: child_pid})
+          ProcessLifecycle.stop_process_safely(child_pid)
 
         _ ->
           :ok
@@ -411,23 +413,6 @@ defmodule Supertester.OTPHelpers do
         Supervisor.stop(pid, :normal, 1000)
       catch
         :exit, _ ->
-          Process.exit(pid, :kill)
-      end
-    end
-  end
-
-  defp stop_process_safely(%{pid: pid}) when is_pid(pid), do: stop_process_safely(pid)
-
-  defp stop_process_safely(pid) when is_pid(pid) do
-    if Process.alive?(pid) do
-      ref = Process.monitor(pid)
-      Process.exit(pid, :normal)
-
-      receive do
-        {:DOWN, ^ref, :process, ^pid, _} -> :ok
-      after
-        1000 ->
-          Process.demonitor(ref, [:flush])
           Process.exit(pid, :kill)
       end
     end

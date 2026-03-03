@@ -159,7 +159,7 @@ defmodule Supertester.ChaosHelpers do
     end_time = start_time + duration_ms
 
     initial_supervisor_alive =
-      case resolve_supervisor_pid(supervisor) do
+      case SupervisorIntrospection.resolve_supervisor_pid(supervisor) do
         pid when is_pid(pid) -> Process.alive?(pid)
         _ -> false
       end
@@ -172,7 +172,7 @@ defmodule Supertester.ChaosHelpers do
       })
 
     final_supervisor_alive =
-      case resolve_supervisor_pid(supervisor) do
+      case SupervisorIntrospection.resolve_supervisor_pid(supervisor) do
         pid when is_pid(pid) -> Process.alive?(pid)
         _ -> false
       end
@@ -496,17 +496,13 @@ defmodule Supertester.ChaosHelpers do
   defp count_restarted_children(supervisor, initial_children, _killed_children) do
     current_children = safe_supervisor_children(supervisor)
 
-    initial_by_id = group_child_pids_by_id(initial_children)
-    current_by_id = group_child_pids_by_id(current_children)
+    initial_by_id = SupervisorIntrospection.group_child_pids_by_id(initial_children)
+    current_by_id = SupervisorIntrospection.group_child_pids_by_id(current_children)
 
     Enum.reduce(initial_by_id, 0, fn {id, initial_pids}, acc ->
       current_pids = Map.get(current_by_id, id, [])
       acc + replacement_count(initial_pids, current_pids)
     end)
-  end
-
-  defp group_child_pids_by_id(children) do
-    SupervisorIntrospection.group_child_pids_by_id(children)
   end
 
   defp replacement_count(_initial_pids, []), do: 0
@@ -638,9 +634,5 @@ defmodule Supertester.ChaosHelpers do
     _ -> []
   catch
     :exit, _ -> []
-  end
-
-  defp resolve_supervisor_pid(supervisor) do
-    SupervisorIntrospection.resolve_supervisor_pid(supervisor)
   end
 end

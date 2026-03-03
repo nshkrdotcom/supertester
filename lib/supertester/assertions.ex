@@ -122,15 +122,6 @@ defmodule Supertester.Assertions do
     end
   end
 
-  defp validate_genserver_state(actual_state, expected)
-       when is_map(expected) or is_list(expected) do
-    if actual_state == expected do
-      :ok
-    else
-      raise "Expected GenServer state to be #{inspect(expected)}, got #{inspect(actual_state)}"
-    end
-  end
-
   defp validate_genserver_state(actual_state, expected) do
     if actual_state == expected do
       :ok
@@ -206,7 +197,7 @@ defmodule Supertester.Assertions do
   """
   @spec assert_supervisor_strategy(Supervisor.supervisor(), atom()) :: :ok
   def assert_supervisor_strategy(supervisor, expected_strategy) do
-    case extract_supervisor_strategy(supervisor) do
+    case SupervisorIntrospection.extract_supervisor_strategy(supervisor) do
       nil ->
         raise "Unable to determine supervisor strategy for #{inspect(supervisor)}"
 
@@ -393,10 +384,6 @@ defmodule Supertester.Assertions do
 
   @type pid_set :: %{optional(pid()) => true}
   @spawn_trace_grace_ms 50
-
-  defp extract_supervisor_strategy(supervisor) do
-    SupervisorIntrospection.extract_supervisor_strategy(supervisor)
-  end
 
   defp linked_processes(pid) when is_pid(pid) do
     case Process.info(pid, :links) do

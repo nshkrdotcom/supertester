@@ -4,6 +4,7 @@ defmodule Supertester.ETSIsolation do
   """
 
   alias Supertester.{Env, IsolationContext, Telemetry, UnifiedTestFoundation}
+  alias Supertester.Internal.IsolationContextStore
 
   @type table_type :: :set | :ordered_set | :bag | :duplicate_bag
   @type table_access :: :public | :protected | :private
@@ -46,6 +47,7 @@ defmodule Supertester.ETSIsolation do
   @ets_tables_key :supertester_ets_tables
   @ets_mirrors_key :supertester_ets_mirrors
   @ets_injections_key :supertester_ets_injections
+  @ets_cleanup_injections_key :supertester_ets_cleanup_injections
 
   @doc """
   Initialize ETS isolation for the current process.
@@ -56,12 +58,13 @@ defmodule Supertester.ETSIsolation do
     Process.put(@ets_tables_key, [])
     Process.put(@ets_mirrors_key, %{})
     Process.put(@ets_injections_key, [])
+    Process.put(@ets_cleanup_injections_key, [])
 
     Env.on_exit(fn ->
       cleanup_all_tables()
     end)
 
-    maybe_update_context(fn ctx ->
+    IsolationContextStore.update(fn ctx ->
       %{ctx | isolated_ets_tables: %{}, ets_mirrors: [], ets_injections: []}
     end)
 
@@ -206,7 +209,7 @@ defmodule Supertester.ETSIsolation do
 
     original = get_module_table_ref(module, function_or_attribute)
     injection = {module, function_or_attribute, original, replacement_table}
-    register_injection(injection)
+    register_injection(injection, cleanup: cleanup, delete_on_cleanup: create)
 
     set_module_table_ref(module, function_or_attribute, replacement_table)
 
@@ -303,7 +306,7 @@ defmodule Supertester.ETSIsolation do
     tables = Process.get(@ets_tables_key, [])
     Process.put(@ets_tables_key, [table | tables])
 
-    maybe_update_context(fn ctx ->
+    IsolationContextStore.update(fn ctx ->
       UnifiedTestFoundation.add_tracked_ets_table(ctx, table)
     end)
   end
@@ -312,7 +315,7 @@ defmodule Supertester.ETSIsolation do
     mirrors = Process.get(@ets_mirrors_key, %{})
     Process.put(@ets_mirrors_key, Map.put(mirrors, source_name, mirror))
 
-    maybe_update_context(fn ctx ->
+    IsolationContextStore.update(fn ctx ->
       %{
         ctx
         | isolated_ets_tables: Map.put(ctx.isolated_ets_tables, source_name, mirror),
@@ -321,11 +324,20 @@ defmodule Supertester.ETSIsolation do
     end)
   end
 
-  defp register_injection(injection) do
+  defp register_injection(injection, opts) do
+    cleanup? = Keyword.get(opts, :cleanup, true)
+    delete_on_cleanup? = Keyword.get(opts, :delete_on_cleanup, true)
+
     injections = Process.get(@ets_injections_key, [])
     Process.put(@ets_injections_key, [injection | injections])
 
-    maybe_update_context(fn ctx ->
+    if cleanup? do
+      cleanup_injections = Process.get(@ets_cleanup_injections_key, [])
+      cleanup_item = {injection, delete_on_cleanup?}
+      Process.put(@ets_cleanup_injections_key, [cleanup_item | cleanup_injections])
+    end
+
+    IsolationContextStore.update(fn ctx ->
       %{ctx | ets_injections: [injection | ctx.ets_injections]}
     end)
   end
@@ -334,22 +346,37 @@ defmodule Supertester.ETSIsolation do
     tables = Process.get(@ets_tables_key, [])
     deleted_count = count_deleted_tables(tables)
 
-    injections = Process.get(@ets_injections_key, [])
-    deleted_injections = cleanup_injections(injections)
+    cleanup_injections = Process.get(@ets_cleanup_injections_key, [])
+    deleted_injections = cleanup_injections(cleanup_injections)
 
     Process.delete(@ets_isolated_key)
     Process.delete(@ets_tables_key)
     Process.delete(@ets_mirrors_key)
     Process.delete(@ets_injections_key)
+    Process.delete(@ets_cleanup_injections_key)
 
     emit_cleanup_complete(deleted_count + deleted_injections)
     :ok
   end
 
   defp cleanup_injections(injections) do
-    Enum.reduce(injections, 0, fn {module, attr, original, replacement}, acc ->
-      set_module_table_ref(module, attr, original)
-      acc + if(safe_delete_table(replacement), do: 1, else: 0)
+    Enum.reduce(injections, 0, fn
+      {{module, attr, original, replacement}, delete_on_cleanup?}, acc ->
+        set_module_table_ref(module, attr, original)
+
+        deleted =
+          if delete_on_cleanup? and safe_delete_table(replacement) do
+            1
+          else
+            0
+          end
+
+        acc + deleted
+
+      {module, attr, original, replacement}, acc ->
+        # Backwards-compatible path for older injection entries.
+        set_module_table_ref(module, attr, original)
+        acc + if(safe_delete_table(replacement), do: 1, else: 0)
     end)
   end
 
@@ -412,18 +439,6 @@ defmodule Supertester.ETSIsolation do
     :error, :badarg ->
       raise ArgumentError,
             "Cannot inject table for #{inspect(module)}.#{function_name}/0 without __supertester_set_table__/2 because this would require creating a dynamic atom"
-  end
-
-  defp maybe_update_context(fun) do
-    case UnifiedTestFoundation.fetch_isolation_context() do
-      %IsolationContext{} = ctx ->
-        updated_ctx = fun.(ctx)
-        UnifiedTestFoundation.put_isolation_context(updated_ctx)
-        updated_ctx
-
-      _ ->
-        nil
-    end
   end
 
   defp emit_setup do

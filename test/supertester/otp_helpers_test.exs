@@ -83,4 +83,11 @@ defmodule Supertester.OTPHelpersTest do
     assert info.module == FailingSupervisor
     assert {:bad_return, _} = info.reason
   end
+
+  test "setup_isolated_supervisor reports parsed init args in failure metadata" do
+    assert {:error, {:start_failed, info}} =
+             setup_isolated_supervisor(FailingSupervisor, "", init_args: [:bad, :config])
+
+    assert info.init_args == [:bad, :config]
+  end
 end

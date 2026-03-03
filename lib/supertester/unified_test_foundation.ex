@@ -1,5 +1,6 @@
 defmodule Supertester.UnifiedTestFoundation do
   alias Supertester.{Env, IsolationContext}
+  alias Supertester.Internal.ProcessLifecycle
   @shared_registry_name :supertester_shared_registry
 
   @moduledoc """
@@ -240,7 +241,7 @@ defmodule Supertester.UnifiedTestFoundation do
 
   defp cleanup_isolation(%IsolationContext{} = isolation_context) do
     isolation_context.processes
-    |> Enum.each(&stop_process_safely/1)
+    |> Enum.each(&ProcessLifecycle.stop_process_safely/1)
 
     isolation_context.ets_tables
     |> Enum.each(&delete_ets_table_safely/1)
@@ -254,19 +255,6 @@ defmodule Supertester.UnifiedTestFoundation do
         :exit, _ -> :ok
       end
     end)
-  end
-
-  defp stop_process_safely(%{pid: pid}) when is_pid(pid) do
-    if Process.alive?(pid) do
-      ref = Process.monitor(pid)
-      Process.exit(pid, :normal)
-
-      receive do
-        {:DOWN, ^ref, :process, ^pid, _} -> :ok
-      after
-        1000 -> Process.exit(pid, :kill)
-      end
-    end
   end
 
   defp delete_ets_table_safely(table) do

@@ -201,6 +201,37 @@ defmodule Supertester.ETSIsolationTest do
     end
   end
 
+  describe "table injection cleanup behavior" do
+    test "cleanup does not delete externally managed tables when create is false" do
+      parent = self()
+
+      owner =
+        spawn(fn ->
+          external = :ets.new(unique_table_name("external"), [:set, :public])
+          send(parent, {:external_table, external, self()})
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert_receive {:external_table, external, ^owner}
+
+      on_exit(fn ->
+        assert :ets.info(external) != :undefined
+        send(owner, :stop)
+      end)
+
+      ETSIsolation.setup_ets_isolation()
+
+      {:ok, _restore} =
+        ETSIsolation.inject_table(InjectedTableModule, :table_name, external,
+          create: false,
+          cleanup: true
+        )
+    end
+  end
+
   describe "with_table/2 and with_table/3" do
     setup do
       ETSIsolation.setup_ets_isolation()

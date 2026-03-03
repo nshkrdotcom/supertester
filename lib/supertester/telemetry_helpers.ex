@@ -4,6 +4,7 @@ defmodule Supertester.TelemetryHelpers do
   """
 
   alias Supertester.{Env, IsolationContext, Telemetry, UnifiedTestFoundation}
+  alias Supertester.Internal.IsolationContextStore
 
   @type event :: [atom()]
   @type measurements :: map()
@@ -30,7 +31,7 @@ defmodule Supertester.TelemetryHelpers do
   def setup_telemetry_isolation do
     test_id = System.unique_integer([:positive, :monotonic])
     Process.put(:supertester_telemetry_test_id, test_id)
-    maybe_update_context(fn ctx -> %{ctx | telemetry_test_id: test_id} end)
+    IsolationContextStore.update(fn ctx -> %{ctx | telemetry_test_id: test_id} end)
     {:ok, test_id}
   end
 
@@ -285,25 +286,30 @@ defmodule Supertester.TelemetryHelpers do
         when result: term()
   def with_telemetry(events, fun, opts \\ []) when is_function(fun, 0) do
     normalized_events = normalize_events(events)
-    {:ok, _handler_id} = attach_isolated(normalized_events, Keyword.put(opts, :buffer, true))
+    {:ok, handler_id} = attach_isolated(normalized_events, Keyword.put(opts, :buffer, true))
 
-    result = fun.()
+    try do
+      result = fun.()
 
-    receive do
-    after
-      10 -> :ok
-    end
-
-    buffered_events = flush_buffer()
-
-    events =
-      if buffered_events == [] do
-        flush_buffer_fallback(normalized_events, get_test_id())
-      else
-        buffered_events
+      receive do
+      after
+        10 -> :ok
       end
 
-    {result, events}
+      buffered_events = flush_buffer()
+
+      events =
+        if buffered_events == [] do
+          flush_buffer_fallback(normalized_events, get_test_id())
+        else
+          buffered_events
+        end
+
+      {result, events}
+    after
+      :telemetry.detach(handler_id)
+      flush_buffer()
+    end
   end
 
   @doc """
@@ -319,21 +325,9 @@ defmodule Supertester.TelemetryHelpers do
   defp normalize_events(events), do: [events]
 
   defp track_handler(handler_id, events) do
-    maybe_update_context(fn ctx ->
+    IsolationContextStore.update(fn ctx ->
       %{ctx | telemetry_handlers: [{handler_id, events} | ctx.telemetry_handlers]}
     end)
-  end
-
-  defp maybe_update_context(fun) do
-    case UnifiedTestFoundation.fetch_isolation_context() do
-      %IsolationContext{} = ctx ->
-        updated_ctx = fun.(ctx)
-        UnifiedTestFoundation.put_isolation_context(updated_ctx)
-        updated_ctx
-
-      _ ->
-        nil
-    end
   end
 
   defp flush_telemetry_loop(acc) do
@@ -373,16 +367,30 @@ defmodule Supertester.TelemetryHelpers do
 
   defp flush_buffer do
     buffer_key = {:supertester_telemetry_buffer, self()}
-    buffer_name = telemetry_buffer_name(self())
 
     case Registry.lookup(@shared_registry_name, buffer_key) do
       [] ->
         []
 
       [{pid, _value}] ->
-        events = Agent.get(pid, &Enum.reverse/1)
-        Agent.stop(buffer_name)
-        events
+        if Process.alive?(pid) do
+          events =
+            try do
+              Agent.get(pid, &Enum.reverse/1)
+            catch
+              :exit, _ -> []
+            end
+
+          try do
+            Agent.stop(pid)
+          catch
+            :exit, _ -> :ok
+          end
+
+          events
+        else
+          []
+        end
     end
   end
 
