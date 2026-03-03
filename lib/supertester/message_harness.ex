@@ -38,10 +38,7 @@ defmodule Supertester.MessageHarness do
         send(collector.pid, :stop)
       end
 
-    messages =
-      collector
-      |> Task.await(timeout)
-      |> Enum.reverse()
+    messages = await_collector_messages!(collector, timeout)
 
     {:messages, final_mailbox} = Process.info(pid, :messages)
 
@@ -60,6 +57,22 @@ defmodule Supertester.MessageHarness do
 
       :stop ->
         acc
+    end
+  end
+
+  defp await_collector_messages!(collector, timeout) do
+    case Task.yield(collector, timeout) do
+      {:ok, messages} ->
+        Enum.reverse(messages)
+
+      {:exit, reason} ->
+        raise RuntimeError, "Trace collector crashed: #{inspect(reason)}"
+
+      nil ->
+        Task.shutdown(collector, :brutal_kill)
+
+        raise RuntimeError,
+              "Timed out collecting traced messages after #{timeout}ms. Increase :timeout for very high message volumes."
     end
   end
 end

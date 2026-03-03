@@ -3,7 +3,7 @@ defmodule Supertester.TelemetryHelpers do
   Async-safe telemetry testing helpers with per-test event isolation.
   """
 
-  alias Supertester.{Env, IsolationContext, Telemetry, UnifiedTestFoundation}
+  alias Supertester.{Env, IsolationContext, Telemetry}
 
   alias Supertester.Internal.{
     IsolationContextStore,
@@ -50,8 +50,7 @@ defmodule Supertester.TelemetryHelpers do
           {:ok, test_id(), IsolationContext.t()}
   def setup_telemetry_isolation(%IsolationContext{} = ctx) do
     {:ok, test_id} = setup_telemetry_isolation()
-    updated_ctx = %{ctx | telemetry_test_id: test_id}
-    UnifiedTestFoundation.put_isolation_context(updated_ctx)
+    updated_ctx = IsolationContextStore.put_updated(ctx, &%{&1 | telemetry_test_id: test_id})
     {:ok, test_id, updated_ctx}
   end
 
@@ -336,7 +335,6 @@ defmodule Supertester.TelemetryHelpers do
       {result, events}
     after
       detach_isolated(handler_id)
-      flush_buffered_telemetry(handler_id)
     end
   end
 

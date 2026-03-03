@@ -5,7 +5,7 @@ defmodule Supertester.LoggerIsolation do
 
   require Logger
 
-  alias Supertester.{Env, IsolationContext, Telemetry, UnifiedTestFoundation}
+  alias Supertester.{Env, IsolationContext, Telemetry}
   alias Supertester.Internal.IsolationContextStore
 
   @type level ::
@@ -52,8 +52,11 @@ defmodule Supertester.LoggerIsolation do
     :ok = setup_logger_isolation()
     original_level = Process.get(:supertester_logger_original_level)
 
-    updated_ctx = %{ctx | logger_original_level: original_level, logger_isolated?: true}
-    UnifiedTestFoundation.put_isolation_context(updated_ctx)
+    updated_ctx =
+      IsolationContextStore.put_updated(ctx, fn context ->
+        %{context | logger_original_level: original_level, logger_isolated?: true}
+      end)
+
     {:ok, updated_ctx}
   end
 

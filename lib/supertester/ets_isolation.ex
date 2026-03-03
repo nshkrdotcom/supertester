@@ -67,7 +67,7 @@ defmodule Supertester.ETSIsolation do
     end)
 
     IsolationContextStore.update(fn ctx ->
-      %{ctx | isolated_ets_tables: %{}, ets_mirrors: [], ets_injections: []}
+      reset_ets_context(ctx)
     end)
 
     emit_setup()
@@ -92,8 +92,7 @@ defmodule Supertester.ETSIsolation do
   def setup_ets_isolation(%IsolationContext{} = ctx) do
     :ok = setup_ets_isolation()
 
-    updated_ctx = %{ctx | isolated_ets_tables: %{}, ets_mirrors: [], ets_injections: []}
-    UnifiedTestFoundation.put_isolation_context(updated_ctx)
+    updated_ctx = IsolationContextStore.put_updated(ctx, &reset_ets_context/1)
     {:ok, updated_ctx}
   end
 
@@ -103,13 +102,13 @@ defmodule Supertester.ETSIsolation do
   @spec setup_ets_isolation(IsolationContext.t(), [table_name()]) ::
           {:ok, IsolationContext.t()}
   def setup_ets_isolation(%IsolationContext{} = ctx, tables) when is_list(tables) do
-    {:ok, ctx} = setup_ets_isolation(ctx)
+    {:ok, base_ctx} = setup_ets_isolation(ctx)
 
     Enum.each(tables, fn table_name ->
       {:ok, _mirror} = mirror_table(table_name)
     end)
 
-    updated_ctx = UnifiedTestFoundation.fetch_isolation_context() || ctx
+    updated_ctx = IsolationContextStore.update(& &1) || base_ctx
     {:ok, updated_ctx}
   end
 
@@ -287,6 +286,10 @@ defmodule Supertester.ETSIsolation do
     end
   end
 
+  defp reset_ets_context(%IsolationContext{} = ctx) do
+    %{ctx | isolated_ets_tables: %{}, ets_mirrors: [], ets_injections: []}
+  end
+
   defp split_create_opts(opts) do
     Enum.reduce(opts, {[], []}, fn
       {key, _value} = option, {create_opts, ets_opts}
@@ -371,28 +374,6 @@ defmodule Supertester.ETSIsolation do
         acc +
           restore_injection(injection_id, injection,
             delete_on_cleanup?: delete_on_cleanup?,
-            remove_cleanup_entry?: false
-          )
-
-      {{module, attr, original, replacement}, delete_on_cleanup?}, acc ->
-        # Backwards-compatible path for older cleanup entries from already-running tests.
-        legacy_id = make_ref()
-        injection = {module, attr, original, replacement}
-
-        acc +
-          restore_injection(legacy_id, injection,
-            delete_on_cleanup?: delete_on_cleanup?,
-            remove_cleanup_entry?: false
-          )
-
-      {module, attr, original, replacement}, acc ->
-        # Backwards-compatible path for older injection entries from already-running tests.
-        legacy_id = make_ref()
-        injection = {module, attr, original, replacement}
-
-        acc +
-          restore_injection(legacy_id, injection,
-            delete_on_cleanup?: true,
             remove_cleanup_entry?: false
           )
     end)

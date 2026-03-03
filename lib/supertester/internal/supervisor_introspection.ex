@@ -39,6 +39,37 @@ defmodule Supertester.Internal.SupervisorIntrospection do
     end)
   end
 
+  @doc false
+  @spec safe_children(Supervisor.supervisor()) :: [{term(), pid() | atom(), atom(), [module()]}]
+  def safe_children(supervisor) do
+    Supervisor.which_children(supervisor)
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
+  end
+
+  @doc false
+  @spec replacement_count([pid()], [pid()]) :: non_neg_integer()
+  def replacement_count(_initial_pids, []), do: 0
+
+  def replacement_count(initial_pids, current_pids) do
+    initial_set = MapSet.new(initial_pids)
+    current_set = MapSet.new(current_pids)
+    survivor_count = MapSet.intersection(initial_set, current_set) |> MapSet.size()
+    replacement_count = max(MapSet.size(current_set) - survivor_count, 0)
+
+    min(length(initial_pids), replacement_count)
+  end
+
+  @doc false
+  @spec child_restarted?([pid()], [pid()]) :: boolean()
+  def child_restarted?(_initial_pids, []), do: false
+
+  def child_restarted?(initial_pids, current_pids) do
+    replacement_count(initial_pids, current_pids) > 0
+  end
+
   # Strategy extraction — handles maps (DynamicSupervisor), specific tuples,
   # and generic tuples (scanning for known strategy atoms).
   defp do_extract_strategy(%{strategy: strategy}) when strategy in @strategies,

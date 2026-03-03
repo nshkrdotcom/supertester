@@ -1,6 +1,8 @@
 defmodule Supertester.Internal.ProcessLifecycle do
   @moduledoc false
 
+  alias Supertester.Internal.SupervisorIntrospection
+
   @spec default_cleanup(term(), map()) :: :ok
   def default_cleanup(subject, _ctx) do
     if is_pid(subject) do
@@ -46,7 +48,7 @@ defmodule Supertester.Internal.ProcessLifecycle do
   def stop_supervisor_safely(pid, timeout \\ 1000) when is_pid(pid) do
     if Process.alive?(pid) do
       pid
-      |> safe_supervisor_children()
+      |> SupervisorIntrospection.safe_children()
       |> Enum.each(fn
         {_id, child_pid, _type, _modules} when is_pid(child_pid) ->
           stop_process_safely(child_pid, timeout)
@@ -86,13 +88,5 @@ defmodule Supertester.Internal.ProcessLifecycle do
       timeout ->
         false
     end
-  end
-
-  defp safe_supervisor_children(supervisor) do
-    Supervisor.which_children(supervisor)
-  rescue
-    _ -> []
-  catch
-    :exit, _ -> []
   end
 end

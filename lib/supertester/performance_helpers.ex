@@ -25,6 +25,10 @@ defmodule Supertester.PerformanceHelpers do
       end
   """
 
+  @default_memory_sample_count 12
+  @default_min_absolute_growth_bytes 256_000
+  @default_min_upward_ratio 0.6
+
   @doc """
   Asserts operation meets performance expectations.
 
@@ -101,31 +105,90 @@ defmodule Supertester.PerformanceHelpers do
       when is_function(operation, 0) and is_integer(iterations) do
     threshold = Keyword.get(opts, :threshold, 0.1)
 
-    # Take memory samples at different points
-    sample_points = [
-      trunc(iterations * 0.1),
-      trunc(iterations * 0.3),
-      trunc(iterations * 0.5),
-      trunc(iterations * 0.7),
-      trunc(iterations * 0.9)
-    ]
+    sample_count =
+      normalize_sample_count(Keyword.get(opts, :sample_count, @default_memory_sample_count))
 
-    samples = collect_memory_samples(operation, iterations, sample_points, [])
+    warmup_iterations =
+      normalize_warmup_iterations(
+        Keyword.get(opts, :warmup_iterations, div(iterations, 10)),
+        iterations
+      )
 
-    # Check for memory trend
-    if length(samples) >= 3 do
-      growth_rate = calculate_growth_rate(samples)
+    if warmup_iterations > 0 do
+      Enum.each(1..warmup_iterations, fn _ -> operation.() end)
+    end
 
-      if growth_rate > threshold do
+    measured_iterations = max(iterations - warmup_iterations, 0)
+    samples = collect_memory_samples(operation, measured_iterations, sample_count)
+
+    case __analyze_memory_samples__(samples, threshold, opts) do
+      :ok ->
+        :ok
+
+      {:leak, info} ->
         raise """
-        Memory leak detected: growth rate #{Float.round(growth_rate * 100, 2)}% exceeds threshold #{Float.round(threshold * 100, 2)}%.
+        Memory leak detected: growth rate #{Float.round(info.growth_rate * 100, 2)}% exceeds threshold #{Float.round(threshold * 100, 2)}%.
 
-        Memory samples: #{inspect(samples)}
+        Absolute growth: #{info.absolute_growth_bytes} bytes
+        Upward trend ratio: #{Float.round(info.upward_ratio * 100, 2)}%
+        Memory samples: #{inspect(info.samples)}
         """
-      end
     end
 
     :ok
+  end
+
+  @doc false
+  @spec __analyze_memory_samples__([non_neg_integer()], float(), keyword()) ::
+          :ok
+          | {:leak,
+             %{
+               growth_rate: float(),
+               absolute_growth_bytes: integer(),
+               upward_ratio: float(),
+               slope: float(),
+               samples: [non_neg_integer()]
+             }}
+  def __analyze_memory_samples__(samples, threshold, opts \\ [])
+      when is_list(samples) and is_float(threshold) do
+    if length(samples) < 3 do
+      :ok
+    else
+      min_absolute_growth =
+        Keyword.get(opts, :min_absolute_growth_bytes, @default_min_absolute_growth_bytes)
+
+      min_upward_ratio = Keyword.get(opts, :min_upward_ratio, @default_min_upward_ratio)
+
+      baseline_window = baseline_window(samples)
+      first_baseline = median_value(Enum.take(samples, baseline_window))
+      last_baseline = median_value(Enum.take(samples, -baseline_window))
+      absolute_growth = trunc(last_baseline - first_baseline)
+
+      growth_rate =
+        if first_baseline <= 0 do
+          0.0
+        else
+          (last_baseline - first_baseline) / first_baseline
+        end
+
+      upward_ratio = upward_step_ratio(samples)
+      slope = least_squares_slope(samples)
+      normalized_slope = if first_baseline <= 0, do: 0.0, else: slope / first_baseline
+
+      if growth_rate > threshold and absolute_growth >= min_absolute_growth and
+           upward_ratio >= min_upward_ratio and normalized_slope > 0 do
+        {:leak,
+         %{
+           growth_rate: growth_rate,
+           absolute_growth_bytes: absolute_growth,
+           upward_ratio: upward_ratio,
+           slope: slope,
+           samples: samples
+         }}
+      else
+        :ok
+      end
+    end
   end
 
   @doc """
@@ -299,40 +362,97 @@ defmodule Supertester.PerformanceHelpers do
 
   # Private functions
 
-  defp collect_memory_samples(_operation, 0, _sample_points, samples) do
-    Enum.reverse(samples)
-  end
+  defp collect_memory_samples(_operation, iterations, _sample_count) when iterations <= 0, do: []
 
-  defp collect_memory_samples(operation, current, sample_points, samples) when current > 0 do
-    operation.()
+  defp collect_memory_samples(operation, iterations, sample_count) do
+    checkpoints = sample_checkpoints(iterations, sample_count)
 
-    new_current = current - 1
+    1..iterations
+    |> Enum.reduce([], fn iteration, acc ->
+      operation.()
 
-    # Check if we should take a sample
-    new_samples =
-      if new_current in sample_points do
+      if MapSet.member?(checkpoints, iteration) do
         :erlang.garbage_collect()
-        memory = :erlang.memory(:total)
-        [memory | samples]
+        [:erlang.memory(:total) | acc]
       else
-        samples
+        acc
       end
-
-    collect_memory_samples(operation, new_current, sample_points, new_samples)
+    end)
+    |> Enum.reverse()
   end
 
-  defp calculate_growth_rate(samples) do
-    if length(samples) < 2 do
+  defp sample_checkpoints(iterations, sample_count) do
+    effective_count = min(max(sample_count, 3), max(iterations, 1))
+
+    1..effective_count
+    |> Enum.map(fn point ->
+      div(iterations * point + effective_count - 1, effective_count)
+    end)
+    |> MapSet.new()
+  end
+
+  defp normalize_sample_count(value) when is_integer(value), do: max(value, 3)
+  defp normalize_sample_count(value) when is_float(value), do: max(trunc(value), 3)
+  defp normalize_sample_count(_), do: @default_memory_sample_count
+
+  defp normalize_warmup_iterations(value, iterations) when is_integer(value) do
+    value
+    |> max(0)
+    |> min(max(iterations, 0))
+  end
+
+  defp normalize_warmup_iterations(value, iterations) when is_float(value) do
+    value
+    |> trunc()
+    |> normalize_warmup_iterations(iterations)
+  end
+
+  defp normalize_warmup_iterations(_, iterations), do: normalize_warmup_iterations(0, iterations)
+
+  defp baseline_window(samples) do
+    sample_count = length(samples)
+    max(1, min(3, div(sample_count, 2)))
+  end
+
+  defp median_value([]), do: 0.0
+
+  defp median_value(values) do
+    sorted = Enum.sort(values)
+    count = length(sorted)
+    mid = div(count, 2)
+
+    if rem(count, 2) == 1 do
+      sorted |> Enum.at(mid) |> Kernel.*(1.0)
+    else
+      (Enum.at(sorted, mid - 1) + Enum.at(sorted, mid)) / 2.0
+    end
+  end
+
+  defp upward_step_ratio(samples) do
+    pairs = Enum.zip(samples, tl(samples))
+    upward_steps = Enum.count(pairs, fn {left, right} -> right > left end)
+    upward_steps / max(length(pairs), 1)
+  end
+
+  defp least_squares_slope(samples) do
+    count = length(samples)
+
+    if count < 2 do
       0.0
     else
-      first = hd(samples)
-      last = List.last(samples)
+      x_mean = (count - 1) / 2.0
+      y_mean = Enum.sum(samples) / count
 
-      if first == 0 do
-        0.0
-      else
-        (last - first) / first
-      end
+      {covariance, variance} =
+        samples
+        |> Enum.with_index()
+        |> Enum.reduce({0.0, 0.0}, fn {y, x}, {cov_acc, var_acc} ->
+          x_delta = x - x_mean
+          y_delta = y - y_mean
+          {cov_acc + x_delta * y_delta, var_acc + x_delta * x_delta}
+        end)
+
+      if variance == 0.0, do: 0.0, else: covariance / variance
     end
   end
 

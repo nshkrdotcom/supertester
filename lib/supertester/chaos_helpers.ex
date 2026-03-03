@@ -333,7 +333,7 @@ defmodule Supertester.ChaosHelpers do
       stats
     else
       # Get current children
-      children = safe_supervisor_children(supervisor)
+      children = SupervisorIntrospection.safe_children(supervisor)
 
       # Kill random children based on kill_rate.
       {killed_count, killed_children} = kill_random_children(children, kill_rate, kill_reason)
@@ -386,26 +386,15 @@ defmodule Supertester.ChaosHelpers do
   defp count_restarted_children(_supervisor, _initial_children, []), do: 0
 
   defp count_restarted_children(supervisor, initial_children, _killed_children) do
-    current_children = safe_supervisor_children(supervisor)
+    current_children = SupervisorIntrospection.safe_children(supervisor)
 
     initial_by_id = SupervisorIntrospection.group_child_pids_by_id(initial_children)
     current_by_id = SupervisorIntrospection.group_child_pids_by_id(current_children)
 
     Enum.reduce(initial_by_id, 0, fn {id, initial_pids}, acc ->
       current_pids = Map.get(current_by_id, id, [])
-      acc + replacement_count(initial_pids, current_pids)
+      acc + SupervisorIntrospection.replacement_count(initial_pids, current_pids)
     end)
-  end
-
-  defp replacement_count(_initial_pids, []), do: 0
-
-  defp replacement_count(initial_pids, current_pids) do
-    initial_set = MapSet.new(initial_pids)
-    current_set = MapSet.new(current_pids)
-    survivors = MapSet.intersection(initial_set, current_set) |> MapSet.size()
-    replacement_count = max(MapSet.size(current_set) - survivors, 0)
-
-    min(length(initial_pids), replacement_count)
   end
 
   defp wait_for_recovery(recovery_fn, timeout) do
@@ -460,12 +449,4 @@ defmodule Supertester.ChaosHelpers do
   end
 
   defp build_harness_input(_target, _scenario), do: {:error, :missing_concurrent_scenario}
-
-  defp safe_supervisor_children(supervisor) do
-    Supervisor.which_children(supervisor)
-  rescue
-    _ -> []
-  catch
-    :exit, _ -> []
-  end
 end

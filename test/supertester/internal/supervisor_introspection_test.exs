@@ -154,4 +154,71 @@ defmodule Supertester.Internal.SupervisorIntrospectionTest do
       send(pid2, :stop)
     end
   end
+
+  describe "safe_children/1" do
+    test "returns children for live supervisors" do
+      {:ok, sup} = OneForOneSupervisor.start_link()
+      children = SupervisorIntrospection.safe_children(sup)
+      assert length(children) == 1
+    end
+
+    test "returns empty list for dead supervisors" do
+      {:ok, sup} = OneForOneSupervisor.start_link()
+      Supervisor.stop(sup)
+      assert SupervisorIntrospection.safe_children(sup) == []
+    end
+  end
+
+  describe "restart diff helpers" do
+    test "replacement_count/2 counts replacement pids" do
+      pid1 =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      pid2 =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      pid3 =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert SupervisorIntrospection.replacement_count([pid1, pid2], [pid2, pid3]) == 1
+
+      send(pid1, :stop)
+      send(pid2, :stop)
+      send(pid3, :stop)
+    end
+
+    test "child_restarted?/2 is true when at least one replacement occurred" do
+      pid1 =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      pid2 =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert SupervisorIntrospection.child_restarted?([pid1], [pid2])
+      refute SupervisorIntrospection.child_restarted?([pid1], [pid1])
+
+      send(pid1, :stop)
+      send(pid2, :stop)
+    end
+  end
 end

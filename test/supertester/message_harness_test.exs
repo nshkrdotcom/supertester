@@ -41,4 +41,23 @@ defmodule Supertester.MessageHarnessTest do
     send(pid, {:stop, self()})
     assert_receive :stopped
   end
+
+  test "trace_messages raises a descriptive error on collector timeout" do
+    {:ok, pid} = Target.start_link()
+
+    assert_raise RuntimeError, ~r/timed out collecting traced messages/i, fn ->
+      MessageHarness.trace_messages(
+        pid,
+        fn ->
+          for _ <- 1..50_000 do
+            send(pid, :noise)
+          end
+        end,
+        timeout: 0
+      )
+    end
+
+    send(pid, {:stop, self()})
+    assert_receive :stopped
+  end
 end

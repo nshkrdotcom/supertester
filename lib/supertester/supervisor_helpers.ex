@@ -116,12 +116,18 @@ defmodule Supertester.SupervisorHelpers do
     # Compare states
     restarted =
       Enum.filter(Map.keys(initial_state), fn id ->
-        child_restarted?(Map.get(initial_state, id, []), Map.get(new_state, id, []))
+        SupervisorIntrospection.child_restarted?(
+          Map.get(initial_state, id, []),
+          Map.get(new_state, id, [])
+        )
       end)
 
     not_restarted =
       Enum.filter(Map.keys(initial_state), fn id ->
-        not child_restarted?(Map.get(initial_state, id, []), Map.get(new_state, id, []))
+        not SupervisorIntrospection.child_restarted?(
+          Map.get(initial_state, id, []),
+          Map.get(new_state, id, [])
+        )
       end)
 
     %{
@@ -331,7 +337,7 @@ defmodule Supertester.SupervisorHelpers do
   @spec wait_for_supervisor_stabilization(Supervisor.supervisor(), timeout()) ::
           :ok | {:error, :timeout}
   def wait_for_supervisor_stabilization(supervisor, timeout \\ 5000) do
-    case Supertester.OTPHelpers.wait_for_supervisor_restart(supervisor, timeout) do
+    case Supertester.UnifiedTestFoundation.wait_for_supervision_tree_ready(supervisor, timeout) do
       {:ok, _} -> :ok
       error -> error
     end
@@ -372,17 +378,6 @@ defmodule Supertester.SupervisorHelpers do
       _ ->
         {:error, :child_not_found}
     end
-  end
-
-  defp child_restarted?(_initial_pids, []), do: false
-
-  defp child_restarted?(initial_pids, current_pids) do
-    initial_set = MapSet.new(initial_pids)
-    current_set = MapSet.new(current_pids)
-    survivors = MapSet.intersection(initial_set, current_set)
-    replacement_count = current_set |> MapSet.difference(initial_set) |> MapSet.size()
-
-    replacement_count > 0 and MapSet.size(survivors) < length(initial_pids)
   end
 
   defp assert_kill_result!(:ok, _child_id), do: :ok

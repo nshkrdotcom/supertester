@@ -27,12 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive test suites for `Assertions`, `ChaosHelpers` edge cases, `ConcurrentHarness` API contract stability, `ETSIsolation` cleanup behavior, and all new internal modules (`Poller`, `ProcessLifecycle`, `ProcessRef`, `SharedRegistry`, `SupervisorIntrospection`, `TelemetryBuffer`).
 - Atom safety regression tests verifying zero unbounded atom creation during isolation setup, ETS exhaustion simulation, and concurrent telemetry usage.
 - Regression tests for `cast_and_sync/4` function-clause missing-sync handling, temporary-child restart reporting, `:one_for_all` cascade restart accounting, ordinary `:timeout` scenario failure handling in `run_chaos_suite/3`, and short-lived transient process handling in `assert_no_process_leaks/1`.
+- `Supertester.Internal.IsolationContextStore.put_updated/2` to consolidate context mutation + persistence in one internal helper.
+- `Supertester.Internal.SupervisorIntrospection.safe_children/1`, `replacement_count/2`, and `child_restarted?/2` for shared supervisor-state/restart analysis across helpers.
+- Targeted regression tests for shared registry stale-name/reset recovery, memory trend analysis behavior, message trace timeout handling, and isolation context store update semantics.
 
 ### Changed
 - **`GenServerHelpers.cast_and_sync/4`**: Non-strict mode now consistently returns `{:error, :missing_sync_handler}` instead of `:ok` when sync handling is missing. Any successful sync call reply (including `{:error, :unknown_call}`) is treated as synchronized and returns `{:ok, reply}`.
 - **`SupervisorHelpers.test_restart_strategy/3`**: Raises `ArgumentError` when scenario child IDs are missing or when the supervisor's actual strategy does not match the expected strategy.
 - **`SupervisorHelpers.assert_supervision_tree_structure/2`**: Now validates expected child modules for leaf children and optional `:supervisor`/`:strategy` keys in the expected structure.
-- **`SupervisorHelpers.wait_for_supervisor_stabilization/2`**: Now delegates to `OTPHelpers.wait_for_supervisor_restart/2` instead of `UnifiedTestFoundation.wait_for_supervision_tree_ready/2`.
+- **`SupervisorHelpers.wait_for_supervisor_stabilization/2`**: Now delegates directly to `UnifiedTestFoundation.wait_for_supervision_tree_ready/2` (flattened wrapper chain).
 - **`Assertions.assert_supervisor_strategy/2`**: Now validates runtime supervisor strategy via `:sys.get_state/1` introspection instead of only verifying process accessibility. Handles both tuple-based (standard Supervisor) and map-based (DynamicSupervisor) internal state formats.
 - **`Assertions.assert_no_process_leaks/1`**: Uses `:erlang.trace/3` to scope leak detection to processes spawned/linked by the operation caller, with a post-operation grace window for delayed descendant detection. Replaces global `Process.list()` snapshot comparison.
 - **`ChaosHelpers.chaos_kill_children/2`**: Treats `kill_rate <= 0` as a no-kill run. Restart accounting now includes observed cascade replacements (e.g., `:one_for_all` sibling restarts).
@@ -48,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ConcurrentHarness`**: Execution engine (~420 lines) extracted to `ConcurrentHarness.Runtime`, leaving the public module as a thin delegation layer.
 - `ex_doc` dependency bumped from `~> 0.27` to `~> 0.40`.
 - `Supertester` moduledoc updated from "Multi-repository test orchestration" to "OTP-focused testing toolkit".
+- **`SharedRegistry.ensure_started/0`**: Added readiness probing/retry logic, stale-name reclamation, and stale partition cleanup so the shared registry can be intentionally reset and recovered safely.
+- **`PerformanceHelpers.assert_no_memory_leak/3`**: Reworked to use warmup + evenly distributed sampling + robust trend analysis instead of a fragile first/last sample delta. Added optional tuning keys (`:sample_count`, `:warmup_iterations`, `:min_absolute_growth_bytes`, `:min_upward_ratio`).
+- **`SupervisorHelpers` / `ChaosHelpers` / `ProcessLifecycle`**: Consolidated supervisor child safety and restart-diff logic to shared `SupervisorIntrospection` internals.
+- **`ETSIsolation` context setup paths**: Reduced duplicated context wiring by using shared `IsolationContextStore.put_updated/2`.
+- **`ETSIsolation` injection cleanup**: Removed legacy cleanup entry-shape handling; cleanup now processes canonical `{injection_id, injection, delete_on_cleanup?}` entries only.
+- **`TelemetryHelpers.with_telemetry/3`**: Removed redundant buffer flush after handler detach.
 
 ### Fixed
 - **`ChaosHelpers.chaos_kill_children/2`**: No longer exits the caller when the supervisor dies mid-loop; returns a report with `supervisor_crashed: true`. Now accepts registered supervisor names (atom, `{:global, _}`, `{:via, _, _}`). Handles duplicate child IDs correctly (e.g., dynamic children with `:undefined` IDs).
@@ -62,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ETS injection restore is now idempotent — duplicate restore calls are tracked and skipped via injection IDs.
 - Shared registry is unlinked from creator to survive when spawned from short-lived Task processes.
 - Refactored `GenServerHelpers.concurrent_calls/4` internals to satisfy strict Credo nesting limits.
+- Intermittent full-suite failures caused by shared registry startup races and stale `PIDPartition` processes after reset/teardown.
+- Intermittent false negatives in `assert_no_memory_leak/3` under suite load by requiring sustained upward trend + meaningful absolute growth before flagging leaks.
+- `MessageHarness.trace_messages/3` timeout path now raises a descriptive `RuntimeError` and shuts down the collector task deterministically.
 
 ### Documentation
 - README and guides refreshed for 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, expanded helper coverage).

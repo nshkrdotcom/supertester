@@ -116,6 +116,29 @@ defmodule Supertester.PerformanceHelpersTest do
     end
   end
 
+  describe "__analyze_memory_samples__/3" do
+    test "flags sustained upward trends as leaks" do
+      samples = [1_000_000, 1_120_000, 1_210_000, 1_330_000, 1_420_000, 1_560_000]
+
+      assert {:leak, info} =
+               Supertester.PerformanceHelpers.__analyze_memory_samples__(samples, 0.05,
+                 min_absolute_growth_bytes: 100_000
+               )
+
+      assert info.growth_rate > 0.05
+      assert info.absolute_growth_bytes > 100_000
+    end
+
+    test "ignores noisy but stable samples" do
+      samples = [1_000_000, 1_030_000, 990_000, 1_015_000, 995_000, 1_010_000]
+
+      assert :ok =
+               Supertester.PerformanceHelpers.__analyze_memory_samples__(samples, 0.02,
+                 min_absolute_growth_bytes: 100_000
+               )
+    end
+  end
+
   describe "measure_operation/1" do
     test "measures operation time and memory" do
       result =

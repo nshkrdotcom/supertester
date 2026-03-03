@@ -15,4 +15,12 @@ defmodule Supertester.Internal.IsolationContextStore do
         nil
     end
   end
+
+  @spec put_updated(IsolationContext.t(), (IsolationContext.t() -> IsolationContext.t())) ::
+          IsolationContext.t()
+  def put_updated(%IsolationContext{} = ctx, fun) when is_function(fun, 1) do
+    updated_ctx = fun.(ctx)
+    UnifiedTestFoundation.put_isolation_context(updated_ctx)
+    updated_ctx
+  end
 end
