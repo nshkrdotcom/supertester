@@ -1,6 +1,6 @@
 defmodule Supertester.GenServerHelpers do
   require Logger
-  alias Supertester.Internal.{Poller, ProcessRef}
+  alias Supertester.Internal.{Poller, ProcessRef, ProcessWatch}
 
   @moduledoc """
   Specialized helpers for GenServer testing patterns.
@@ -303,10 +303,9 @@ defmodule Supertester.GenServerHelpers do
   end
 
   defp await_crash_confirmation(ref, original_pid, _crash_reason) do
-    receive do
-      {:DOWN, ^ref, :process, ^original_pid, _reason} -> true
-    after
-      1000 -> false
+    case ProcessWatch.await_down(ref, original_pid, 1000) do
+      {:down, _reason} -> true
+      :timeout -> false
     end
   end
 

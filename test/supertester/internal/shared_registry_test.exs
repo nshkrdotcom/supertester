@@ -2,14 +2,14 @@ defmodule Supertester.Internal.SharedRegistryTest do
   use ExUnit.Case, async: false
 
   alias Supertester.Internal.SharedRegistry
+  alias Supertester.UnifiedTestFoundation
 
   setup do
-    stop_registered_process(SharedRegistry.name())
-    :ok
+    {:ok, pid} = SharedRegistry.ensure_started()
+    %{registry_pid: pid}
   end
 
-  test "ensure_started/0 starts and reuses a ready shared registry" do
-    assert {:ok, pid_1} = SharedRegistry.ensure_started()
+  test "ensure_started/0 starts and reuses a ready shared registry", %{registry_pid: pid_1} do
     assert is_pid(pid_1)
     assert Process.alive?(pid_1)
     assert Process.whereis(SharedRegistry.name()) == pid_1
@@ -19,7 +19,27 @@ defmodule Supertester.Internal.SharedRegistryTest do
     assert pid_1 == pid_2
   end
 
+  test "ensure_started/0 remains stable under concurrent callers", %{registry_pid: pid} do
+    results =
+      1..40
+      |> Task.async_stream(
+        fn _ -> SharedRegistry.ensure_started() end,
+        max_concurrency: 20,
+        timeout: 2_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    pids =
+      Enum.map(results, fn
+        {:ok, shared_pid} -> shared_pid
+      end)
+
+    assert Enum.uniq(pids) == [pid]
+    assert Process.alive?(pid)
+  end
+
   test "ensure_started/0 replaces a stale named process with a real registry" do
+    stop_registered_process(SharedRegistry.name())
     parent = self()
 
     fake =
@@ -56,6 +76,22 @@ defmodule Supertester.Internal.SharedRegistryTest do
     assert Process.alive?(pid_2)
     assert Process.whereis(SharedRegistry.name()) == pid_2
     assert :ets.whereis(SharedRegistry.name()) != :undefined
+  end
+
+  test "shared registry remains stable across repeated registry isolation setups", %{
+    registry_pid: registry_pid
+  } do
+    Enum.each(1..10, fn idx ->
+      assert {:ok, %{isolation_context: %{registry: registry}}} =
+               UnifiedTestFoundation.setup_isolation(:registry, %{
+                 test: String.to_atom("registry_case_#{idx}")
+               })
+
+      assert registry == SharedRegistry.name()
+    end)
+
+    assert {:ok, current_pid} = SharedRegistry.ensure_started()
+    assert current_pid == registry_pid
   end
 
   defp stop_registered_process(name) when is_atom(name) do

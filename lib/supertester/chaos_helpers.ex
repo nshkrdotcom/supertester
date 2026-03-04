@@ -101,13 +101,18 @@ defmodule Supertester.ChaosHelpers do
     reason = Keyword.get(opts, :reason, :chaos_injection)
 
     spawn(fn ->
-      receive do
-      after
-        duration -> :ok
-      end
+      ref = Process.monitor(target)
 
-      if Process.alive?(target) do
-        Process.exit(target, reason)
+      receive do
+        {:DOWN, ^ref, :process, ^target, _reason} ->
+          :ok
+      after
+        duration ->
+          Process.demonitor(ref, [:flush])
+
+          if Process.alive?(target) do
+            Process.exit(target, reason)
+          end
       end
     end)
 

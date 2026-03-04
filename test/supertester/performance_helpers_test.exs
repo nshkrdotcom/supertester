@@ -208,6 +208,86 @@ defmodule Supertester.PerformanceHelpersTest do
       # Mailbox should have grown during the operation
       assert report.max_size >= 0
     end
+
+    test "does not leak mailbox monitor tasks when operation raises" do
+      pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      on_exit(fn ->
+        send(pid, :stop)
+      end)
+
+      before_count = length(Process.list())
+
+      Enum.each(1..20, fn _ ->
+        assert_raise RuntimeError, "boom", fn ->
+          measure_mailbox_growth(
+            pid,
+            fn ->
+              raise "boom"
+            end,
+            sampling_interval: 1
+          )
+        end
+      end)
+
+      receive do
+      after
+        80 -> :ok
+      end
+
+      after_count = length(Process.list())
+      assert after_count - before_count < 8
+    end
+
+    test "does not leak mailbox monitor tasks when operation throws or exits" do
+      pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      on_exit(fn ->
+        send(pid, :stop)
+      end)
+
+      before_count = length(Process.list())
+
+      Enum.each(1..10, fn _ ->
+        assert catch_throw(
+                 measure_mailbox_growth(
+                   pid,
+                   fn ->
+                     throw(:boom)
+                   end,
+                   sampling_interval: 1
+                 )
+               ) == :boom
+
+        assert catch_exit(
+                 measure_mailbox_growth(
+                   pid,
+                   fn ->
+                     exit(:boom)
+                   end,
+                   sampling_interval: 1
+                 )
+               ) == :boom
+      end)
+
+      receive do
+      after
+        80 -> :ok
+      end
+
+      after_count = length(Process.list())
+      assert after_count - before_count < 10
+    end
   end
 
   describe "assert_mailbox_stable/2" do

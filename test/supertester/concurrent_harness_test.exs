@@ -94,6 +94,35 @@ defmodule Supertester.ConcurrentHarnessTest do
     refute Process.alive?(pid)
   end
 
+  test "default cleanup stops the subject even when a thread times out" do
+    parent = self()
+
+    scenario = %{
+      setup: fn ->
+        {:ok, pid} = CounterServer.start_link([])
+        send(parent, {:subject_timeout_case, pid})
+        {:ok, pid, %{}}
+      end,
+      threads: [
+        [
+          {:custom,
+           fn _subject ->
+             receive do
+             after
+               200 -> :ok
+             end
+           end}
+        ]
+      ],
+      timeout_ms: 20,
+      invariant: fn _, _ -> :ok end
+    }
+
+    assert {:error, {:thread_failure, {:error, :timeout}}} = ConcurrentHarness.run(scenario)
+    assert_receive {:subject_timeout_case, pid}
+    refute Process.alive?(pid)
+  end
+
   test "chaos hook runs alongside scenario" do
     parent = self()
 

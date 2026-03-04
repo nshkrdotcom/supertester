@@ -13,10 +13,20 @@ defmodule Supertester.Internal.TelemetryMailbox do
 
   @spec flush_matching(event(), integer() | nil) :: [telemetry_message()]
   def flush_matching(event_pattern, test_id) do
-    flush_all()
-    |> Enum.filter(fn {:telemetry, event, _measurements, metadata} ->
+    matcher = fn event, metadata ->
       matches_event?(event, event_pattern) and matches_test_id?(metadata, test_id)
-    end)
+    end
+
+    do_flush_selecting(matcher, [], [])
+  end
+
+  @spec flush_matching_many([event()], integer() | nil) :: [telemetry_message()]
+  def flush_matching_many(event_patterns, test_id) when is_list(event_patterns) do
+    matcher = fn event, metadata ->
+      event in event_patterns and matches_test_id?(metadata, test_id)
+    end
+
+    do_flush_selecting(matcher, [], [])
   end
 
   @spec receive_matching(
@@ -50,6 +60,21 @@ defmodule Supertester.Internal.TelemetryMailbox do
     after
       0 ->
         Enum.reverse(acc)
+    end
+  end
+
+  defp do_flush_selecting(matcher, matching, stash) when is_function(matcher, 2) do
+    receive do
+      {:telemetry, event, _measurements, metadata} = msg ->
+        if matcher.(event, metadata) do
+          do_flush_selecting(matcher, [msg | matching], stash)
+        else
+          do_flush_selecting(matcher, matching, [msg | stash])
+        end
+    after
+      0 ->
+        requeue_messages(stash)
+        Enum.reverse(matching)
     end
   end
 

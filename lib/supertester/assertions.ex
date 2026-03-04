@@ -1,5 +1,5 @@
 defmodule Supertester.Assertions do
-  alias Supertester.Internal.SupervisorIntrospection
+  alias Supertester.Internal.{ProcessWatch, SupervisorIntrospection}
 
   @persistent_leak_wait_ms 75
 
@@ -475,12 +475,11 @@ defmodule Supertester.Assertions do
     if Process.alive?(pid) do
       ref = Process.monitor(pid)
 
-      receive do
-        {:DOWN, ^ref, :process, ^pid, _reason} ->
+      case ProcessWatch.await_down(ref, pid, wait_ms) do
+        {:down, _reason} ->
           false
-      after
-        wait_ms ->
-          Process.demonitor(ref, [:flush])
+
+        :timeout ->
           Process.alive?(pid)
       end
     else

@@ -151,6 +151,17 @@ defmodule Supertester.TelemetryHelpersTest do
 
       refute_receive {:telemetry, _, _, _}, 0
     end
+
+    test "flush_telemetry/1 preserves non-matching telemetry messages" do
+      TelemetryHelpers.emit_with_context([:test, :flush], %{}, %{id: 1})
+      TelemetryHelpers.emit_with_context([:test, :count], %{}, %{id: 2})
+
+      events = TelemetryHelpers.flush_telemetry([:test, :flush])
+
+      assert [{:telemetry, [:test, :flush], %{}, %{id: 1}}] = events
+      assert_receive {:telemetry, [:test, :count], %{}, %{id: 2}}
+      refute_receive {:telemetry, [:test, :flush], _, _}, 0
+    end
   end
 
   describe "with_telemetry/3 and emit_with_context/3" do
@@ -231,6 +242,13 @@ defmodule Supertester.TelemetryHelpersTest do
       :ok = TelemetryHelpers.detach_isolated(handler_id)
 
       assert [] = TelemetryHelpers.flush_buffered_telemetry(handler_id)
+    end
+
+    test "detach_isolated/1 is idempotent" do
+      {:ok, handler_id} = TelemetryHelpers.attach_isolated([:test, :idempotent_detach])
+
+      assert :ok = TelemetryHelpers.detach_isolated(handler_id)
+      assert :ok = TelemetryHelpers.detach_isolated(handler_id)
     end
   end
 end

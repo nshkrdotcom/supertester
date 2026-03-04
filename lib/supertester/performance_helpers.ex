@@ -263,18 +263,20 @@ defmodule Supertester.PerformanceHelpers do
     {:message_queue_len, initial_size} = Process.info(server, :message_queue_len)
     sampling_interval = Keyword.get(opts, :sampling_interval, 10)
 
-    # Start monitoring task
     monitor_task =
       Task.async(fn ->
         monitor_mailbox(server, [initial_size], sampling_interval)
       end)
 
-    # Run operation
-    result = operation.()
-
-    # Stop monitoring
-    send(monitor_task.pid, :stop)
-    samples = Task.await(monitor_task, 5000)
+    {result, samples} =
+      try do
+        result = operation.()
+        {result, stop_monitor_task(monitor_task)}
+      catch
+        kind, reason ->
+          _ = stop_monitor_task(monitor_task)
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
 
     {:message_queue_len, final_size} = Process.info(server, :message_queue_len)
 
@@ -470,6 +472,15 @@ defmodule Supertester.PerformanceHelpers do
             # Process died during monitoring
             samples
         end
+    end
+  end
+
+  defp stop_monitor_task(task) do
+    send(task.pid, :stop)
+
+    case Task.yield(task, 1_000) || Task.shutdown(task, :brutal_kill) do
+      {:ok, samples} when is_list(samples) -> samples
+      _ -> []
     end
   end
 end

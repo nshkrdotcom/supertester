@@ -55,22 +55,12 @@ defmodule Supertester.ETSIsolation do
   """
   @spec setup_ets_isolation() :: :ok
   def setup_ets_isolation do
-    Process.put(@ets_isolated_key, true)
-    Process.put(@ets_tables_key, [])
-    Process.put(@ets_mirrors_key, %{})
-    Process.put(@ets_injections_key, [])
-    Process.put(@ets_cleanup_injections_key, [])
-    Process.put(@ets_restored_injections_key, %{})
-
-    Env.on_exit(fn ->
-      cleanup_all_tables()
-    end)
+    initialize_ets_session()
 
     IsolationContextStore.update(fn ctx ->
       reset_ets_context(ctx)
     end)
 
-    emit_setup()
     :ok
   end
 
@@ -80,17 +70,13 @@ defmodule Supertester.ETSIsolation do
   @spec setup_ets_isolation([table_name()]) :: :ok
   def setup_ets_isolation(tables) when is_list(tables) do
     :ok = setup_ets_isolation()
-
-    Enum.each(tables, fn table_name ->
-      {:ok, _mirror} = mirror_table(table_name)
-    end)
-
+    mirror_tables(tables)
     :ok
   end
 
   @spec setup_ets_isolation(IsolationContext.t()) :: {:ok, IsolationContext.t()}
   def setup_ets_isolation(%IsolationContext{} = ctx) do
-    :ok = setup_ets_isolation()
+    initialize_ets_session()
 
     updated_ctx = IsolationContextStore.put_updated(ctx, &reset_ets_context/1)
     {:ok, updated_ctx}
@@ -103,13 +89,37 @@ defmodule Supertester.ETSIsolation do
           {:ok, IsolationContext.t()}
   def setup_ets_isolation(%IsolationContext{} = ctx, tables) when is_list(tables) do
     {:ok, base_ctx} = setup_ets_isolation(ctx)
+    mirror_tables(tables)
 
+    {:ok, fetch_current_context(base_ctx)}
+  end
+
+  defp initialize_ets_session do
+    Process.put(@ets_isolated_key, true)
+    Process.put(@ets_tables_key, [])
+    Process.put(@ets_mirrors_key, %{})
+    Process.put(@ets_injections_key, [])
+    Process.put(@ets_cleanup_injections_key, [])
+    Process.put(@ets_restored_injections_key, %{})
+
+    Env.on_exit(fn ->
+      cleanup_all_tables()
+    end)
+
+    emit_setup()
+  end
+
+  defp mirror_tables(tables) when is_list(tables) do
     Enum.each(tables, fn table_name ->
       {:ok, _mirror} = mirror_table(table_name)
     end)
+  end
 
-    updated_ctx = IsolationContextStore.update(& &1) || base_ctx
-    {:ok, updated_ctx}
+  defp fetch_current_context(%IsolationContext{} = fallback_ctx) do
+    case UnifiedTestFoundation.fetch_isolation_context() do
+      %IsolationContext{} = current_ctx -> current_ctx
+      _ -> fallback_ctx
+    end
   end
 
   @doc """

@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Supertester.Internal.IsolationContextStore.put_updated/2` to consolidate context mutation + persistence in one internal helper.
 - `Supertester.Internal.SupervisorIntrospection.safe_children/1`, `replacement_count/2`, and `child_restarted?/2` for shared supervisor-state/restart analysis across helpers.
 - Targeted regression tests for shared registry stale-name/reset recovery, memory trend analysis behavior, message trace timeout handling, and isolation context store update semantics.
+- Internal module `Supertester.Internal.ProcessWatch` — shared monitor/`DOWN` wait utility used across lifecycle-sensitive internals.
+- Focused internal test coverage for `TelemetryMailbox` selective flush/requeue behavior and `ProcessWatch` timeout/down semantics.
+- Cleanup regression coverage for mailbox monitor tasks on `raise`/`throw`/`exit`, concurrent-harness timeout cleanup, and shared-registry lifecycle stability under repeated isolation setup.
 
 ### Changed
 - **`GenServerHelpers.cast_and_sync/4`**: Non-strict mode now consistently returns `{:error, :missing_sync_handler}` instead of `:ok` when sync handling is missing. Any successful sync call reply (including `{:error, :unknown_call}`) is treated as synchronized and returns `{:ok, reply}`.
@@ -51,12 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ConcurrentHarness`**: Execution engine (~420 lines) extracted to `ConcurrentHarness.Runtime`, leaving the public module as a thin delegation layer.
 - `ex_doc` dependency bumped from `~> 0.27` to `~> 0.40`.
 - `Supertester` moduledoc updated from "Multi-repository test orchestration" to "OTP-focused testing toolkit".
-- **`SharedRegistry.ensure_started/0`**: Added readiness probing/retry logic, stale-name reclamation, and stale partition cleanup so the shared registry can be intentionally reset and recovered safely.
 - **`PerformanceHelpers.assert_no_memory_leak/3`**: Reworked to use warmup + evenly distributed sampling + robust trend analysis instead of a fragile first/last sample delta. Added optional tuning keys (`:sample_count`, `:warmup_iterations`, `:min_absolute_growth_bytes`, `:min_upward_ratio`).
 - **`SupervisorHelpers` / `ChaosHelpers` / `ProcessLifecycle`**: Consolidated supervisor child safety and restart-diff logic to shared `SupervisorIntrospection` internals.
 - **`ETSIsolation` context setup paths**: Reduced duplicated context wiring by using shared `IsolationContextStore.put_updated/2`.
 - **`ETSIsolation` injection cleanup**: Removed legacy cleanup entry-shape handling; cleanup now processes canonical `{injection_id, injection, delete_on_cleanup?}` entries only.
 - **`TelemetryHelpers.with_telemetry/3`**: Removed redundant buffer flush after handler detach.
+- **`SharedRegistry.ensure_started/0`**: Simplified to a global-lock guarded start-or-reuse path with targeted stale recovery; avoids multi-branch retry loops while keeping reset recovery behavior.
+- **`ChaosHelpers.inject_crash/3` (`{:after_ms, _}`)**: Delayed injectors now monitor the target and cancel immediately on target exit, enforcing guaranteed cancellation semantics.
+- **`PerformanceHelpers.measure_mailbox_growth/3`**: Mailbox monitor tasks are now always stopped/joined, including exception (`raise`/`throw`/`exit`) paths.
+- **`TelemetryMailbox` + `TelemetryHelpers` selective flush paths**: Consolidated flush filtering internals and switched selective flush behavior to preserve non-matching telemetry messages.
+- **`ETSIsolation.setup_ets_isolation/*`**: Setup overloads now share one initialization pipeline and explicit context fetch path (removed no-op context update pattern).
 
 ### Fixed
 - **`ChaosHelpers.chaos_kill_children/2`**: No longer exits the caller when the supervisor dies mid-loop; returns a report with `supervisor_crashed: true`. Now accepts registered supervisor names (atom, `{:global, _}`, `{:via, _, _}`). Handles duplicate child IDs correctly (e.g., dynamic children with `:undefined` IDs).
@@ -74,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Intermittent full-suite failures caused by shared registry startup races and stale `PIDPartition` processes after reset/teardown.
 - Intermittent false negatives in `assert_no_memory_leak/3` under suite load by requiring sustained upward trend + meaningful absolute growth before flagging leaks.
 - `MessageHarness.trace_messages/3` timeout path now raises a descriptive `RuntimeError` and shuts down the collector task deterministically.
+- `TelemetryHelpers.flush_telemetry/1` no longer drops unrelated telemetry messages when flushing a specific event pattern.
+- Delayed crash injectors no longer linger for full timeout after target termination.
+- `measure_mailbox_growth/3` no longer leaks monitor tasks when wrapped operations fail via exceptions or exits.
 
 ### Documentation
 - README and guides refreshed for 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, expanded helper coverage).

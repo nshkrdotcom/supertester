@@ -227,6 +227,30 @@ defmodule Supertester.ChaosHelpersTest do
 
       Process.flag(:trap_exit, false)
     end
+
+    test "delayed crash cancels pending injector when target exits before timeout" do
+      before_count = length(Process.list())
+
+      Enum.each(1..60, fn _ ->
+        target =
+          spawn(fn ->
+            receive do
+              :stop -> :ok
+            end
+          end)
+
+        inject_crash(target, {:after_ms, 500})
+        Process.exit(target, :kill)
+      end)
+
+      receive do
+      after
+        80 -> :ok
+      end
+
+      after_count = length(Process.list())
+      assert after_count - before_count < 20
+    end
   end
 
   describe "chaos_kill_children/3" do

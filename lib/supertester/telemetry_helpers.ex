@@ -383,21 +383,8 @@ defmodule Supertester.TelemetryHelpers do
   end
 
   defp flush_buffer_fallback(event_patterns, test_id) do
-    telemetry_messages = TelemetryMailbox.flush_all()
-
-    {matching, unmatched} =
-      Enum.split_with(telemetry_messages, fn {:telemetry, event, _measurements, metadata} ->
-        event in event_patterns and message_matches_test_id?(metadata, test_id)
-      end)
-
-    Enum.each(unmatched, &send(self(), &1))
-    matching
+    TelemetryMailbox.flush_matching_many(event_patterns, test_id)
   end
-
-  defp message_matches_test_id?(_metadata, nil), do: true
-
-  defp message_matches_test_id?(metadata, test_id),
-    do: Map.get(metadata, :supertester_test_id) == test_id
 
   defp normalize_assert_args(metadata_or_opts, opts) do
     if is_list(metadata_or_opts) and Keyword.keyword?(metadata_or_opts) and opts == [] do

@@ -1,55 +1,85 @@
 defmodule Supertester.Internal.SharedRegistry do
   @moduledoc false
 
-  alias Supertester.Internal.Poller
+  alias Supertester.Internal.{Poller, ProcessWatch}
 
   @registry_name :supertester_shared_registry
   @ready_timeout_ms 200
-  @max_start_attempts 3
+  @start_lock {:supertester, :shared_registry_start_lock}
 
   @spec name() :: atom()
   def name, do: @registry_name
 
   @spec ensure_started() :: {:ok, pid()}
   def ensure_started do
-    ensure_ready_registry(@max_start_attempts)
+    :global.trans(@start_lock, fn ->
+      ensure_started_locked()
+    end)
   end
 
-  defp ensure_ready_registry(attempts_left) when attempts_left > 0 do
-    with {:ok, pid} <- fetch_or_start_registry(),
-         :ok <- await_registry_ready(pid) do
-      {:ok, pid}
-    else
-      {:error, :not_ready} ->
-        cleanup_stale_registry()
-        ensure_ready_registry(attempts_left - 1)
+  defp ensure_started_locked do
+    case Process.whereis(@registry_name) do
+      pid when is_pid(pid) ->
+        case await_registry_ready(pid) do
+          :ok ->
+            {:ok, pid}
+
+          {:error, :not_ready} ->
+            terminate_process(pid, @ready_timeout_ms)
+            start_or_reuse_registry()
+        end
+
+      nil ->
+        start_or_reuse_registry()
     end
   end
 
-  defp ensure_ready_registry(0) do
-    cleanup_stale_registry()
+  defp start_or_reuse_registry do
+    case start_registry_once() do
+      {:ok, pid} ->
+        Process.unlink(pid)
+        await_registry_ready_or_raise(pid)
 
-    with {:ok, pid} <- start_registry(),
-         :ok <- await_registry_ready(pid) do
-      {:ok, pid}
-    else
+      {:error, {:already_started, pid}} ->
+        await_registry_ready_or_raise(pid)
+
+      {:error, reason} ->
+        if stale_partition_error?(reason) do
+          cleanup_stale_partitions()
+          retry_start_registry()
+        else
+          raise "unable to start shared registry #{@registry_name}: #{inspect(reason)}"
+        end
+    end
+  end
+
+  defp retry_start_registry do
+    case start_registry_once() do
+      {:ok, pid} ->
+        Process.unlink(pid)
+        await_registry_ready_or_raise(pid)
+
+      {:error, {:already_started, pid}} ->
+        await_registry_ready_or_raise(pid)
+
+      {:error, reason} ->
+        raise "unable to start shared registry #{@registry_name}: #{inspect(reason)}"
+    end
+  end
+
+  defp await_registry_ready_or_raise(pid) when is_pid(pid) do
+    case await_registry_ready(pid) do
+      :ok ->
+        {:ok, pid}
+
       {:error, :not_ready} ->
         raise "unable to start shared registry #{@registry_name} in a ready state"
-    end
-  end
-
-  defp fetch_or_start_registry do
-    case Process.whereis(@registry_name) do
-      pid when is_pid(pid) -> {:ok, pid}
-      nil -> start_registry()
     end
   end
 
   defp await_registry_ready(pid) when is_pid(pid) do
     case Poller.until(fn -> registry_ready_probe(pid) end, @ready_timeout_ms, 5) do
       :ok -> :ok
-      {:error, :timeout} -> {:error, :not_ready}
-      {:error, _} -> {:error, :not_ready}
       _ -> {:error, :not_ready}
     end
   end
@@ -68,47 +98,8 @@ defmodule Supertester.Internal.SharedRegistry do
         :ok
     end
   catch
-    :error, _ ->
-      :retry
-
-    :exit, _ ->
-      :retry
-  end
-
-  defp start_registry do
-    cleanup_stale_partitions()
-
-    case start_registry_once() do
-      {:ok, pid} ->
-        Process.unlink(pid)
-        {:ok, pid}
-
-      {:error, {:already_started, pid}} ->
-        {:ok, pid}
-
-      {:error, reason} ->
-        handle_start_error(reason)
-    end
-  end
-
-  defp handle_start_error(reason) do
-    if stale_partition_error?(reason) do
-      cleanup_stale_partitions()
-
-      case start_registry_once() do
-        {:ok, pid} ->
-          Process.unlink(pid)
-          {:ok, pid}
-
-        {:error, {:already_started, pid}} ->
-          {:ok, pid}
-
-        {:error, _reason} ->
-          {:error, :not_ready}
-      end
-    else
-      {:error, :not_ready}
-    end
+    :error, _ -> :retry
+    :exit, _ -> :retry
   end
 
   defp start_registry_once do
@@ -143,21 +134,6 @@ defmodule Supertester.Internal.SharedRegistry do
     |> String.contains?("#{@registry_name}.PIDPartition")
   end
 
-  defp cleanup_stale_registry do
-    case Process.whereis(@registry_name) do
-      pid when is_pid(pid) ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-        await_down(ref, pid, @ready_timeout_ms)
-
-      _ ->
-        :ok
-    end
-
-    cleanup_stale_partitions()
-    :ok
-  end
-
   defp cleanup_stale_partitions do
     partition_token = "#{@registry_name}.PIDPartition"
 
@@ -169,22 +145,28 @@ defmodule Supertester.Internal.SharedRegistry do
     end)
     |> Enum.each(fn name ->
       case Process.whereis(name) do
-        pid when is_pid(pid) ->
-          ref = Process.monitor(pid)
-          Process.exit(pid, :kill)
-          await_down(ref, pid, @ready_timeout_ms)
-
-        _ ->
-          :ok
+        pid when is_pid(pid) -> terminate_process(pid, @ready_timeout_ms)
+        _ -> :ok
       end
     end)
+
+    :ok
+  end
+
+  defp terminate_process(pid, timeout) when is_pid(pid) do
+    if Process.alive?(pid) do
+      ref = Process.monitor(pid)
+      Process.exit(pid, :kill)
+      await_down(ref, pid, timeout)
+    end
+
+    :ok
   end
 
   defp await_down(ref, pid, timeout) do
-    receive do
-      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
-    after
-      timeout -> Process.demonitor(ref, [:flush])
+    case ProcessWatch.await_down(ref, pid, timeout) do
+      {:down, _reason} -> :ok
+      :timeout -> :ok
     end
   end
 end

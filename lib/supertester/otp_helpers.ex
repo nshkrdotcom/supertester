@@ -1,5 +1,5 @@
 defmodule Supertester.OTPHelpers do
-  alias Supertester.Internal.{Poller, ProcessLifecycle, ProcessRef, SharedRegistry}
+  alias Supertester.Internal.{Poller, ProcessLifecycle, ProcessRef, ProcessWatch, SharedRegistry}
 
   @moduledoc """
   OTP-compliant testing utilities for GenServer, Supervisor, and process management.
@@ -190,13 +190,9 @@ defmodule Supertester.OTPHelpers do
   def wait_for_process_death(pid, timeout \\ 1000) when is_pid(pid) do
     ref = Process.monitor(pid)
 
-    receive do
-      {:DOWN, ^ref, :process, ^pid, reason} ->
-        {:ok, reason}
-    after
-      timeout ->
-        Process.demonitor(ref, [:flush])
-        {:error, :timeout}
+    case ProcessWatch.await_down(ref, pid, timeout) do
+      {:down, reason} -> {:ok, reason}
+      :timeout -> {:error, :timeout}
     end
   end
 

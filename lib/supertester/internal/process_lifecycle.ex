@@ -1,7 +1,7 @@
 defmodule Supertester.Internal.ProcessLifecycle do
   @moduledoc false
 
-  alias Supertester.Internal.SupervisorIntrospection
+  alias Supertester.Internal.{ProcessWatch, SupervisorIntrospection}
 
   @spec default_cleanup(term(), map()) :: :ok
   def default_cleanup(subject, _ctx) do
@@ -81,12 +81,9 @@ defmodule Supertester.Internal.ProcessLifecycle do
   end
 
   defp await_down(ref, pid, timeout) do
-    receive do
-      {:DOWN, ^ref, :process, ^pid, _reason} ->
-        true
-    after
-      timeout ->
-        false
+    case ProcessWatch.await_down(ref, pid, timeout) do
+      {:down, _reason} -> true
+      :timeout -> false
     end
   end
 end

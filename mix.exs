@@ -118,10 +118,19 @@ defmodule Supertester.MixProject do
         ],
         "Release Notes": ["CHANGELOG.md"]
       ],
-      skip_code_autolink_to: [
-        "Supertester.Env.ExUnit",
-        "Supertester.Internal.SupervisorIntrospection"
-      ],
+      skip_code_autolink_to: fn
+        "Supertester.Env.ExUnit" ->
+          true
+
+        "Supertester.ConcurrentHarness.Runtime" ->
+          true
+
+        reference when is_binary(reference) ->
+          String.starts_with?(reference, "Supertester.Internal.")
+
+        _ ->
+          false
+      end,
       groups_for_modules: [
         "Core API": [
           Supertester,
