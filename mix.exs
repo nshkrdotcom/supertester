@@ -78,7 +78,6 @@ defmodule Supertester.MixProject do
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
-        "Online documentation" => "https://hexdocs.pm/supertester",
         "Changelog" => "#{@source_url}/blob/master/CHANGELOG.md"
       },
       maintainers: ["nshkrdotcom"]
