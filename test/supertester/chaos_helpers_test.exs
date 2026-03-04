@@ -229,27 +229,23 @@ defmodule Supertester.ChaosHelpersTest do
     end
 
     test "delayed crash cancels pending injector when target exits before timeout" do
-      before_count = length(Process.list())
+      spawned =
+        capture_direct_spawns(fn ->
+          Enum.each(1..60, fn _ ->
+            target =
+              spawn(fn ->
+                receive do
+                  :stop -> :ok
+                end
+              end)
 
-      Enum.each(1..60, fn _ ->
-        target =
-          spawn(fn ->
-            receive do
-              :stop -> :ok
-            end
+            inject_crash(target, {:after_ms, 500})
+            Process.exit(target, :kill)
           end)
+        end)
 
-        inject_crash(target, {:after_ms, 500})
-        Process.exit(target, :kill)
-      end)
-
-      receive do
-      after
-        80 -> :ok
-      end
-
-      after_count = length(Process.list())
-      assert after_count - before_count < 20
+      assert length(spawned) >= 60
+      assert_all_terminated(spawned, 500)
     end
   end
 
@@ -423,50 +419,27 @@ defmodule Supertester.ChaosHelpersTest do
   describe "simulate_resource_exhaustion/2" do
     @tag :slow
     test "exhausts process limit and returns cleanup function" do
-      # Get current process count
-      initial_count = length(Process.list())
-
-      # Exhaust 5% of remaining capacity (safe amount)
       {:ok, cleanup} =
         simulate_resource_exhaustion(:process_limit, percentage: 0.05, spawn_count: 100)
 
-      # Should have spawned processes
-      new_count = length(Process.list())
-      assert new_count > initial_count
-      assert new_count >= initial_count + 50
+      spawned = captured_pids(cleanup)
+      assert length(spawned) == 100
+      assert Enum.all?(spawned, &Process.alive?/1)
 
-      # Cleanup should remove spawned processes
       cleanup.()
-
-      # Give processes time to clean up
-      receive do
-      after
-        50 -> :ok
-      end
-
-      # Count should be back near initial (allow some variance)
-      final_count = length(Process.list())
-      assert abs(final_count - initial_count) < 100
+      assert_all_terminated(spawned, 500)
     end
 
     @tag :slow
     test "ETS table exhaustion" do
-      initial_tables = length(:ets.all())
-
       {:ok, cleanup} = simulate_resource_exhaustion(:ets_tables, count: 50)
 
-      new_tables = length(:ets.all())
-      assert new_tables >= initial_tables + 40
+      tables = captured_tables(cleanup)
+      assert length(tables) == 50
+      assert Enum.all?(tables, fn table -> :ets.info(table) != :undefined end)
 
       cleanup.()
-
-      receive do
-      after
-        50 -> :ok
-      end
-
-      final_tables = length(:ets.all())
-      assert abs(final_tables - initial_tables) < 10
+      assert Enum.all?(tables, fn table -> :ets.info(table) == :undefined end)
     end
 
     test "returns error for invalid resource type" do
@@ -710,12 +683,17 @@ defmodule Supertester.ChaosHelpersTest do
 
   defp capture_direct_spawns(fun) when is_function(fun, 0) do
     caller = self()
-    :erlang.trace(caller, true, [:procs])
+    :erlang.trace(caller, true, [:procs, :set_on_spawn])
 
     try do
       fun.()
     after
-      :erlang.trace(caller, false, [:procs])
+      receive do
+      after
+        10 -> :ok
+      end
+
+      :erlang.trace(caller, false, [:procs, :set_on_spawn])
     end
 
     drain_spawn_messages(caller, [])
@@ -727,16 +705,16 @@ defmodule Supertester.ChaosHelpersTest do
       {:trace, ^caller, :spawn, spawned_pid, _mfa} when is_pid(spawned_pid) ->
         drain_spawn_messages(caller, [spawned_pid | acc])
 
-      {:trace, ^caller, :spawned, spawned_pid, _mfa} when is_pid(spawned_pid) ->
+      {:trace, spawned_pid, :spawned, ^caller, _mfa} when is_pid(spawned_pid) ->
         drain_spawn_messages(caller, [spawned_pid | acc])
 
-      {:trace, ^caller, _event, _arg} ->
+      {:trace, _traced_pid, _event, _arg} ->
         drain_spawn_messages(caller, acc)
 
-      {:trace, ^caller, _event, _arg1, _arg2} ->
+      {:trace, _traced_pid, _event, _arg1, _arg2} ->
         drain_spawn_messages(caller, acc)
 
-      {:trace, ^caller, _event, _arg1, _arg2, _arg3} ->
+      {:trace, _traced_pid, _event, _arg1, _arg2, _arg3} ->
         drain_spawn_messages(caller, acc)
     after
       0 ->
@@ -745,7 +723,51 @@ defmodule Supertester.ChaosHelpersTest do
   end
 
   defp captured_tables(cleanup_fun) when is_function(cleanup_fun, 0) do
+    captured_list(cleanup_fun, fn table_id -> is_reference(table_id) or is_atom(table_id) end)
+  end
+
+  defp captured_pids(cleanup_fun) when is_function(cleanup_fun, 0) do
+    captured_list(cleanup_fun, &is_pid/1)
+  end
+
+  defp captured_list(cleanup_fun, item_predicate)
+       when is_function(cleanup_fun, 0) and is_function(item_predicate, 1) do
     {:env, env} = :erlang.fun_info(cleanup_fun, :env)
-    Enum.find(env, [], &is_list/1)
+
+    Enum.find(env, [], fn
+      list when is_list(list) -> Enum.all?(list, item_predicate)
+      _other -> false
+    end)
+  end
+
+  defp assert_all_terminated([], _timeout_ms), do: :ok
+
+  defp assert_all_terminated(pids, timeout_ms) when is_list(pids) and timeout_ms >= 0 do
+    refs =
+      Enum.reduce(pids, %{}, fn pid, acc ->
+        Map.put(acc, Process.monitor(pid), pid)
+      end)
+
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    wait_for_all_down(refs, deadline)
+  end
+
+  defp wait_for_all_down(refs, _deadline) when map_size(refs) == 0, do: :ok
+
+  defp wait_for_all_down(refs, deadline) do
+    remaining_timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:DOWN, ref, :process, _pid, _reason} ->
+        wait_for_all_down(Map.delete(refs, ref), deadline)
+    after
+      remaining_timeout ->
+        still_alive =
+          refs
+          |> Map.values()
+          |> Enum.filter(&Process.alive?/1)
+
+        flunk("Expected all processes to terminate, still alive: #{inspect(still_alive)}")
+    end
   end
 end

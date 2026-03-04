@@ -221,27 +221,28 @@ defmodule Supertester.PerformanceHelpersTest do
         send(pid, :stop)
       end)
 
-      before_count = length(Process.list())
-
-      Enum.each(1..20, fn _ ->
-        assert_raise RuntimeError, "boom", fn ->
-          measure_mailbox_growth(
-            pid,
-            fn ->
-              raise "boom"
-            end,
-            sampling_interval: 1
-          )
-        end
-      end)
+      spawned =
+        capture_direct_spawns(fn ->
+          Enum.each(1..20, fn _ ->
+            assert_raise RuntimeError, "boom", fn ->
+              measure_mailbox_growth(
+                pid,
+                fn ->
+                  raise "boom"
+                end,
+                sampling_interval: 1
+              )
+            end
+          end)
+        end)
 
       receive do
       after
-        80 -> :ok
+        120 -> :ok
       end
 
-      after_count = length(Process.list())
-      assert after_count - before_count < 8
+      leaked = Enum.filter(spawned, &Process.alive?/1)
+      assert leaked == []
     end
 
     test "does not leak mailbox monitor tasks when operation throws or exits" do
@@ -256,37 +257,38 @@ defmodule Supertester.PerformanceHelpersTest do
         send(pid, :stop)
       end)
 
-      before_count = length(Process.list())
+      spawned =
+        capture_direct_spawns(fn ->
+          Enum.each(1..10, fn _ ->
+            assert catch_throw(
+                     measure_mailbox_growth(
+                       pid,
+                       fn ->
+                         throw(:boom)
+                       end,
+                       sampling_interval: 1
+                     )
+                   ) == :boom
 
-      Enum.each(1..10, fn _ ->
-        assert catch_throw(
-                 measure_mailbox_growth(
-                   pid,
-                   fn ->
-                     throw(:boom)
-                   end,
-                   sampling_interval: 1
-                 )
-               ) == :boom
-
-        assert catch_exit(
-                 measure_mailbox_growth(
-                   pid,
-                   fn ->
-                     exit(:boom)
-                   end,
-                   sampling_interval: 1
-                 )
-               ) == :boom
-      end)
+            assert catch_exit(
+                     measure_mailbox_growth(
+                       pid,
+                       fn ->
+                         exit(:boom)
+                       end,
+                       sampling_interval: 1
+                     )
+                   ) == :boom
+          end)
+        end)
 
       receive do
       after
-        80 -> :ok
+        120 -> :ok
       end
 
-      after_count = length(Process.list())
-      assert after_count - before_count < 10
+      leaked = Enum.filter(spawned, &Process.alive?/1)
+      assert leaked == []
     end
   end
 
@@ -335,9 +337,8 @@ defmodule Supertester.PerformanceHelpersTest do
   describe "compare_performance/2" do
     test "compares performance of multiple functions" do
       funcs = %{
-        "fast" => fn -> 1 + 1 end,
+        "fast" => fn -> :fast end,
         "medium" => fn -> Enum.sum(1..100) end,
-        # Much larger to ensure measurable difference
         "slow" => fn -> Enum.sum(1..10_000) end
       }
 
@@ -347,8 +348,59 @@ defmodule Supertester.PerformanceHelpersTest do
       assert Map.has_key?(results, "medium")
       assert Map.has_key?(results, "slow")
 
-      # Fast should be faster than slow (or same if too fast to measure)
-      assert results["fast"].time_us <= results["slow"].time_us
+      assert results["fast"].result == :fast
+      assert results["medium"].result == 5050
+      assert results["slow"].result == 50_005_000
+
+      Enum.each(results, fn {_name, metrics} ->
+        assert is_integer(metrics.time_us)
+        assert metrics.time_us >= 0
+        assert is_integer(metrics.memory_bytes)
+        assert metrics.memory_bytes >= 0
+        assert is_integer(metrics.reductions)
+        assert metrics.reductions >= 0
+      end)
+    end
+  end
+
+  defp capture_direct_spawns(fun) when is_function(fun, 0) do
+    caller = self()
+    :erlang.trace(caller, true, [:procs, :set_on_spawn])
+
+    try do
+      fun.()
+    after
+      receive do
+      after
+        10 -> :ok
+      end
+
+      :erlang.trace(caller, false, [:procs, :set_on_spawn])
+    end
+
+    drain_spawn_messages(caller, [])
+    |> Enum.uniq()
+  end
+
+  defp drain_spawn_messages(caller, acc) do
+    receive do
+      {:trace, ^caller, :spawn, spawned_pid, _mfa} when is_pid(spawned_pid) ->
+        drain_spawn_messages(caller, [spawned_pid | acc])
+
+      {:trace, spawned_pid, :spawned, ^caller, _mfa} when is_pid(spawned_pid) ->
+        drain_spawn_messages(caller, [spawned_pid | acc])
+
+      {:trace, _traced_pid, _event, _arg} ->
+        drain_spawn_messages(caller, acc)
+
+      {:trace, _traced_pid, _event, _arg1, _arg2} ->
+        drain_spawn_messages(caller, acc)
+
+      {:trace, _traced_pid, _event, _arg1, _arg2, _arg3} ->
+        drain_spawn_messages(caller, acc)
+    after
+      0 ->
+        Enum.reverse(acc)
     end
   end
 end

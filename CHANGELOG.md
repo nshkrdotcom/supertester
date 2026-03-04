@@ -84,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TelemetryHelpers.flush_telemetry/1` no longer drops unrelated telemetry messages when flushing a specific event pattern.
 - Delayed crash injectors no longer linger for full timeout after target termination.
 - `measure_mailbox_growth/3` no longer leaks monitor tasks when wrapped operations fail via exceptions or exits.
+- CI flakiness in chaos/performance tests reduced by replacing global VM count/timing-order assertions with deterministic resource lifecycle assertions (captured pids/table IDs and teardown verification).
 
 ### Documentation
 - README and guides refreshed for 0.6.0 API behavior (strict sync guidance, supervisor validation semantics, chaos suite timeout behavior, expanded helper coverage).
