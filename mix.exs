@@ -74,7 +74,7 @@ defmodule Supertester.MixProject do
     [
       name: "supertester",
       description: description(),
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib assets .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
